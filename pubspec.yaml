@@ -1,0 +1,28 @@
+name: xtrack
+description: Offline Android personal tracker
+version: 1.0.0+1
+publish_to: none
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: 2.6.1
+  sqflite_sqlcipher: 3.1.0+1
+  flutter_secure_storage: 9.2.4
+  local_auth: 2.3.0
+  cryptography: 2.7.0
+  flutter_local_notifications: 19.4.0
+  timezone: 0.10.1
+  fl_chart: 0.70.2
+dev_dependencies:
+  integration_test:
+    sdk: flutter
+  flutter_test:
+    sdk: flutter
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/v1.sql
+    - assets/v2.sql
+    - assets/v3.sql
