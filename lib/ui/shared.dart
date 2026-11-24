@@ -30,7 +30,7 @@ Widget txTile(BuildContext c,Store s,RowData r){
   final transfer=r['kind']=='Transfer',income=r['kind']=='Income';
   final color=transfer?Colors.blueGrey:income?green:red;
   return ListTile(contentPadding:EdgeInsets.zero,onTap:()=>edit(c,r['kind'],r),leading:CircleAvatar(backgroundColor:color.withAlpha(24),child:Icon(transfer?Icons.swap_horiz:income?Icons.south_west:Icons.north_east,color:color)),
-    title:Text(transfer?'Transfer':label(s,'categories',r['category'])),subtitle:Text('${label(s,'accounts',r['account'])}${transfer?' → ${label(s,'accounts',r['destination'])}':''}\n${r['day']}'),
+    title:Text(transfer?'Transfer':label(s,'categories',r['category'])),subtitle:Text('${label(s,'accounts',r['account'])}${transfer?' → ${label(s,'accounts',r['destination'])}':''}\n${r['day']} ${r['kind']=='Expense'?clock(c,r['minute']):''}'),
     trailing:Text(s.money(r['amount']),style:TextStyle(color:color,fontWeight:FontWeight.w600)));
 }
 Set<String> logs(Store s,RowData h)=>{for(final l in s.rows('habit_logs')) if(l['habit']==h['id']) l['day'] as String};

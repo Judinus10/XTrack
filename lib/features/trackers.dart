@@ -55,9 +55,10 @@ class _TaskState extends ConsumerState<TaskPage>{
   }
 }
 Widget goalTile(BuildContext c,Store s,RowData g){
-  final progress=(g['current'] as int)/(g['target'] as int);
+  final loss=g['category']=='Weight loss';
+  final progress=loss?(g['baseline']-g['current'])/(g['baseline']-g['target']):(g['current'] as int)/(g['target'] as int);
   final hidden=g['category']=='Financial'&&s.pref('hidden','0')=='1';
-  final remaining=((g['target'] as int)-(g['current'] as int)).clamp(0,g['target'] as int).toInt();
+  final remaining=loss?((g['current'] as int)-(g['target'] as int)).clamp(0,1<<52).toInt():((g['target'] as int)-(g['current'] as int)).clamp(0,g['target'] as int).toInt();
   return InkWell(onTap:()=>edit(c,'Goal',g),child:Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     ListTile(contentPadding:EdgeInsets.zero,leading:badge(g),title:Text(g['name']),subtitle:Text('${g['category']} · Due ${g['day']}'),trailing:Text('${(progress*100).round()}%')),
     meter(progress),Text(hidden?'Balances hidden':'${decimal(g['current'])} / ${decimal(g['target'])} ${g['unit']} · ${decimal(remaining)} remaining')])));

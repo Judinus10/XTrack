@@ -15,14 +15,24 @@ class _LockState extends State<LockPage>{
     try{
       final passed=bio?await Vault.biometric():await Vault.check(pin.text);
       if(!mounted)return;
-      if(passed){widget.onUnlock();}else{pin.clear();setState(()=>error='Authentication failed');}
+      if(passed){
+        if(!await Vault.patternEnabled() && mounted){
+          final next=await pattern(context,'Create your unlock pattern');
+          if(next==null||!mounted||await pattern(context,'Confirm pattern')!=next)return;
+          await Vault.setPin(next);
+        }
+        widget.onUnlock();
+      }else{pin.clear();setState(()=>error='Authentication failed');}
     }catch(e){if(mounted)setState(()=>error=e.toString());}
     finally{if(mounted)setState(()=>busy=false);}
   }
   @override Widget build(BuildContext c)=>PopScope(canPop:false,child:Scaffold(body:SafeArea(child:Center(child:SingleChildScrollView(padding:const EdgeInsets.all(26),child:Column(mainAxisSize:MainAxisSize.min,children:[
     const Icon(Icons.lock_outline,size:42,color:green),const SizedBox(height:18),Text('Unlock XTrack',style:Theme.of(c).textTheme.headlineSmall),const SizedBox(height:18),
-    TextField(controller:pin,keyboardType:TextInputType.number,obscureText:true,maxLength:6,decoration:InputDecoration(labelText:'6-digit PIN',errorText:error.isEmpty?null:error),onSubmitted:(_)=>unlock(false)),
-    FilledButton(onPressed:busy?null:()=>unlock(false),child:const Text('Unlock')),
+    FutureBuilder<bool>(future:Vault.patternEnabled(),builder:(c,state){
+      if(!state.hasData)return const CircularProgressIndicator();
+      if(state.data!)return PatternPad((value){pin.text=value;unlock(false);});
+      return TextField(controller:pin,keyboardType:TextInputType.number,obscureText:true,maxLength:6,decoration:const InputDecoration(labelText:'Existing PIN'),onSubmitted:(_)=>unlock(false));
+    }),Text(error),
     Consumer(builder:(c,ref,_)=>ref.watch(storeProvider).bio?TextButton.icon(onPressed:busy?null:()=>unlock(true),icon:const Icon(Icons.fingerprint),label:const Text('Use biometrics')):const SizedBox())]))))));
 }
 Future<void> remindersEnabled(BuildContext c,Store s,bool value)=>guard(c,()async {
@@ -35,7 +45,7 @@ class ReminderPage extends ConsumerWidget{
     final s=ref.watch(storeProvider),items=s.rows('reminders');
     return Scaffold(appBar:AppBar(title:const Text('Reminders')),body:SafeArea(child:feed([
       SwitchListTile(title:const Text('Local reminders'),value:s.pref('notifications','0')=='1',onChanged:(v)=>remindersEnabled(c,s,v)),
-      if(s.reminderError!=null)note(s.reminderError!),if(items.isEmpty)note('Choose a reminder time when editing a task or habit.'),
+      link('Add custom reminder',()=>customReminder(c,s)),for(final r in s.rows('custom_reminders'))ListTile(title:Text(r['name']),subtitle:Text('${r['day']} · ${clock(c,r['minute'])}'),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()=>guard(c,()=>s.remove('custom_reminders',r['id'])))),if(s.reminderError!=null)note(s.reminderError!),if(items.isEmpty)note('Choose a reminder time when editing a task or habit.'),
       for(final r in items)Builder(builder:(_){
         final habit=r['habit']!=null,kind=habit?'Habit':'Task';
         final row=s.rows(habit?'habits':'tasks').firstWhere((v)=>v['id']==(r['habit']??r['task']));
@@ -56,7 +66,7 @@ class _SettingsState extends ConsumerState<SettingsPage>{
   }
   Future<bool> verify(Store s)async{
     if(!s.hasPin)return true;
-    final value=await prompt(context,'Enter existing PIN',secret:true);
+    final value=await Vault.patternEnabled()?await pattern(context,'Verify pattern'):await prompt(context,'Enter existing PIN',secret:true);
     if(value==null)return false;
     if(!await Vault.check(value))throw StateError('Incorrect PIN');
     return true;
@@ -64,10 +74,9 @@ class _SettingsState extends ConsumerState<SettingsPage>{
   Future<void> pin(Store s,bool enable)async{
     if(!await verify(s)||!mounted)return;
     if(enable){
-      final value=await prompt(context,'Create a 6-digit PIN',secret:true);
+      final value=await pattern(context,'Create pattern');
       if(value==null||!mounted)return;
-      if(!RegExp(r'^\d{6}$').hasMatch(value))throw const FormatException('Enter exactly six digits');
-      if(await prompt(context,'Confirm PIN',secret:true)!=value)throw StateError('PINs did not match');
+      if(await pattern(context,'Confirm pattern')!=value)throw StateError('Patterns differ');
       await Vault.setPin(value);
     }else{
       await Vault.storage.delete(key:'bio');s.bio=false;
@@ -90,7 +99,7 @@ class _SettingsState extends ConsumerState<SettingsPage>{
       await s.restore(decoded);
     }else{
       if(await prompt(context,'Confirm backup passphrase',secret:true)!=pass)throw StateError('Passphrases did not match');
-      final encrypted=await Vault.seal(pass,{'version':3,'data':s.data});
+      final encrypted=await Vault.seal(pass,{'version':4,'data':s.data});
       if(encrypted.length>32*1024*1024)throw StateError('Backup exceeds 32 MB');
       if(await Vault.device.invokeMethod<bool>('save',encrypted)!=true)return;
     }
@@ -104,21 +113,18 @@ class _SettingsState extends ConsumerState<SettingsPage>{
       if(busy)const LinearProgressIndicator(),
       panel(c,[heading('Appearance'),setting('Theme','theme',['system','light','dark'],'system'),setting('Currency label','currency',['LKR','USD','EUR','GBP','INR'],'LKR'),note('Changing the label keeps the recorded amounts.')]),
       panel(c,[heading('Reminders'),SwitchListTile(title:const Text('Enable reminders'),value:s.pref('notifications','0')=='1',onChanged:(v)=>run(()=>remindersEnabled(c,s,v))),if(s.reminderError!=null)note(s.reminderError!)]),
-      panel(c,[heading('Security'),SwitchListTile(title:const Text('Application PIN'),value:s.hasPin,onChanged:(v)=>run(()=>pin(s,v))),
-        if(s.hasPin)...[link('Change PIN',()=>run(()=>pin(s,true))),SwitchListTile(title:const Text('Biometric unlock'),value:s.bio,onChanged:(v)=>run(()async {
+      panel(c,[heading('Security'),SwitchListTile(title:const Text('Application pattern'),value:s.hasPin,onChanged:(v)=>run(()=>pin(s,v))),
+        if(s.hasPin)...[link('Change pattern',()=>run(()=>pin(s,true))),SwitchListTile(title:const Text('Biometric unlock'),value:s.bio,onChanged:(v)=>run(()async {
           if(!await verify(s))return;
           if(v&&!await Vault.biometric())throw StateError('Biometric verification failed');
           await Vault.storage.write(key:'bio',value:v?'1':'0');s.bio=v;await s.refresh();
         }))]]),
       panel(c,[heading('Local data'),ListTile(leading:const Icon(Icons.file_upload_outlined),title:const Text('Export encrypted backup'),onTap:()=>run(()=>backup(s,false))),
         ListTile(leading:const Icon(Icons.file_download_outlined),title:const Text('Restore encrypted backup'),onTap:()=>run(()=>backup(s,true))),
-        SwitchListTile(title:const Text('Demo records'),subtitle:const Text('Separate sample accounts and activities'),value:s.rows('accounts').any((a)=>a['demo']==1),onChanged:(v)=>run(()async {
-          if(v){await s.loadDemo();}else if(await confirm(c,'Clear demo records?','Only sample records and their history will be removed.')){await s.clearDemo();}
-        })),
         ListTile(title:const Text('Reset application data',style:TextStyle(color:red)),onTap:()=>run(()async{
           if(!await verify(s)||!c.mounted||!await confirm(c,'Reset XTrack?','Delete all records, preferences, PIN and reminders on this device?'))return;
           await s.reset();for(final k in ['bio','attempts','pin']){await Vault.storage.delete(key:k);}s.hasPin=false;s.bio=false;await s.refresh();
         }))]),
-      panel(c,[heading('XTrack'),note('Version 1.0.0 · Offline personal tracker')])] ))));
+      panel(c,[heading('XTrack'),note('Version 2.0.0 · Offline personal tracker')])] ))));
   }
 }

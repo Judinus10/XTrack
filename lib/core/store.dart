@@ -10,7 +10,7 @@ import 'alarms.dart';
 part 'demo.dart';
 
 final storeProvider=ChangeNotifierProvider<Store>((ref)=>throw StateError('Store not initialized'));
-const tables=['categories','accounts','transactions','habits','habit_schedules','habit_logs','tasks','goals','reminders','settings'];
+const tables=['categories','accounts','transactions','habits','habit_schedules','habit_logs','tasks','goals','reminders','custom_reminders','measurements','snoozes','settings'];
 class Store extends ChangeNotifier {
   late Database db;
   final alarms=Alarms();
@@ -25,7 +25,7 @@ class Store extends ChangeNotifier {
       key=base64UrlEncode(Vault.random(32));
       await Vault.storage.write(key:'database',value:key);
     }
-    db=await openDatabase('${await getDatabasesPath()}/xtrack.db',version:3,password:key,
+    db=await openDatabase('${await getDatabasesPath()}/xtrack.db',version:4,password:key,
       onConfigure:(d)=>d.execute('PRAGMA foreign_keys=ON'),
       onCreate:(d,v)=>migrate(d,0,v),onUpgrade:migrate);
     hasPin=await Vault.storage.containsKey(key:'pin');
@@ -83,6 +83,7 @@ class Store extends ChangeNotifier {
     await t.insert('settings',{'key':key,'value':value},conflictAlgorithm:ConflictAlgorithm.replace);
   },reschedule:key=='notifications');
   Future<void> save(String table,RowData record,{int? id,int? minute})=>write((t) async {
+    if(id!=null)await t.delete('snoozes',where:'owner=? AND ownerId=?',whereArgs:[table,id]);
     if(id==null){id=await t.insert(table,record);} else {await t.update(table,record,where:'id=?',whereArgs:[id]);}
     if(table=='habits'){
       final previous=await t.query('habit_schedules',where:'habit=?',whereArgs:[id],orderBy:'day DESC',limit:1);
@@ -96,27 +97,30 @@ class Store extends ChangeNotifier {
       await t.delete('reminders',where:'$col=?',whereArgs:[id]);
       if(minute!=null) await t.insert('reminders',{col:id,'minute':minute});
     }
-  },reschedule:table=='habits'||table=='tasks');
+  },reschedule:['habits','tasks','accounts','custom_reminders'].contains(table));
   Future<void> change(String table,int id,RowData fields)=>write((t) async {
+    await t.delete('snoozes',where:'owner=? AND ownerId=?',whereArgs:[table,id]);
     await t.update(table,fields,where:'id=?',whereArgs:[id]);
     if(table=='habits' && fields.containsKey('archived')){
       final row=(await t.query('habits',where:'id=?',whereArgs:[id])).single;
       await t.insert('habit_schedules',{'habit':id,'day':today,'days':fields['archived']==1?0:row['days']},conflictAlgorithm:ConflictAlgorithm.replace);
     }
-  },reschedule:table=='habits'||table=='tasks');
+  },reschedule:['habits','tasks','accounts','custom_reminders'].contains(table));
   Future<void> remove(String table,int id)=>write((t) async {await t.delete(table,where:'id=?',whereArgs:[id]);},reschedule:true);
   Future<void> log(int habit,String day)=>write((t) async {
     final h=(await t.query('habits',where:'id=?',whereArgs:[habit])).single;
     if(h['archived']==1||day.compareTo(today)>0||!scheduled({...h,'history':await t.query('habit_schedules',where:'habit=?',whereArgs:[habit])},DateTime.parse(day))) throw StateError('Outside habit schedule');
+    await t.delete('snoozes',where:'owner=? AND ownerId=?',whereArgs:['habits',habit]);
     final removed=await t.delete('habit_logs',where:'habit=? AND day=?',whereArgs:[habit,day]);
     if(removed==0) await t.insert('habit_logs',{'habit':habit,'day':day});
-  });
+  },reschedule:true);
   int balance(RowData a,{String? until})=>(a['opening'] as int)+ledger
     .where((r)=>r['account_id']==a['id']&&(until==null||(r['day'] as String).compareTo(until)<=0))
     .fold<int>(0,(n,r)=>n+(r['delta'] as int));
   Future<void> restore(dynamic backup)=>write((t) async {
-    if(backup is! Map || backup['version']!=3) throw const FormatException('Unsupported backup version');
+    if(backup is! Map || ![3,4].contains(backup['version'])) throw const FormatException('Unsupported backup version');
     final records=backup['data'];
+    if(backup['version']==3 && records is Map){records['custom_reminders']=[];records['measurements']=[];records['snoozes']=[];}
     if(records is! Map || tables.any((name)=>records[name] is! List)){
       throw const FormatException('Backup is missing a record group');
     }

@@ -19,10 +19,11 @@ class Vault {
     });
     return SecretKey(bytes);
   }
+  static Future<bool> patternEnabled()async=> (jsonDecode(await storage.read(key:'pin')??'[]') as List).length==3;
   static Future<void> setPin(String pin) async {
     final salt = random(16);
     final hash = await (await derive(pin,salt)).extractBytes();
-    await storage.write(key:'pin', value:jsonEncode([base64Encode(salt),base64Encode(hash)]));
+    await storage.write(key:'pin', value:jsonEncode([base64Encode(salt),base64Encode(hash),if(pin.startsWith('pattern:')) true]));
     await storage.delete(key:'attempts');
   }
   static Future<bool> check(String pin) async {

@@ -59,7 +59,7 @@ class _AnalyticsState extends ConsumerState<Analytics>{
       if(dayKey(b[i].start).compareTo(today)>0)break;
       final end=shift(b[i].end,-1);
       final until=end.isAfter(DateTime.now())?today:dayKey(end);
-      spots.add(FlSpot(i.toDouble(),s.rows('accounts').fold<int>(0,(n,a)=>n+s.balance(a,until:until))/100));
+      spots.add(FlSpot(i.toDouble(),s.rows('accounts').where((a)=>a['type']!='Fixed deposit').fold<int>(0,(n,a)=>n+s.balance(a,until:until))/100));
     }
     final habits=[for(final p in b)s.rows('habit_logs').where((r)=>within(r['day'],p.start,p.end)).length.toDouble()];
     final done=[for(final p in b)s.rows('tasks').where((r)=>r['completed']!=null&&within(r['completed'],p.start,p.end)).length.toDouble()];

@@ -9,6 +9,7 @@ import 'core/store.dart';
 import 'core/vault.dart';
 part 'ui/shared.dart';
 part 'features/editor.dart';
+part 'features/personal.dart';
 part 'features/dashboard.dart';
 part 'features/trackers.dart';
 part 'features/analytics.dart';
@@ -27,7 +28,7 @@ class _BootstrapState extends State<Bootstrap>{
       overrides:[storeProvider.overrideWith((_)=>store)],child:const XTrack());
     return MaterialApp(home:Scaffold(body:Center(child:s.hasError?
       Column(mainAxisSize:MainAxisSize.min,children:[const Text('Could not open XTrack'),Text('${s.error}'),TextButton(onPressed:()=>setState(()=>ready=store.init()),child:const Text('Retry'))]):
-      const CircularProgressIndicator())));
+      const Column(mainAxisSize:MainAxisSize.min,children:[Icon(Icons.insights,size:52,color:green),Text('XTrack',style:TextStyle(fontSize:28,fontWeight:FontWeight.bold)),SizedBox(height:16),SizedBox(width:96,child:LinearProgressIndicator(color:green))]))));
   });
 }
 const green=Color(0xff16a34a), accent=Color(0xff22c55e), red=Color(0xffdc4047);

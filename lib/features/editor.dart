@@ -19,12 +19,13 @@ class _EditorState extends ConsumerState<Editor>{
     final s=ref.read(storeProvider);
     v={ 'day':today,'type':'Cash','start':today,'days':127,'priority':'Medium','icon':'Leaf','color':'Green',
       'category':kind=='Goal'?'Personal':kind=='Task'?'Personal':null,...?widget.row};
-    for(final key in ['name','description','amount','opening','unit','current','target','taskCategory']){
+    for(final key in ['name','description','amount','opening','unit','current','target','expected','bank','taskCategory']){
       final raw=key=='taskCategory'?v['category']:v[key];
-      final initial=['amount','opening','current','target'].contains(key)?
+      final initial=['amount','opening','current','target','expected'].contains(key)?
         raw!=null?decimal(raw as int):['opening','current'].contains(key)?'0':'':raw?.toString()??'';
       fields[key]=TextEditingController(text:initial);
     }
+    if(kind=='Expense' && widget.row==null)v['minute']=DateTime.now().hour*60+DateTime.now().minute;
     if(kind=='Account'&&widget.row==null)v['icon']='Wallet';
     if(kind=='Goal'&&widget.row==null)v['icon']='Flag';
     if(widget.row!=null && (kind=='Habit'||kind=='Task')){
@@ -62,16 +63,17 @@ class _EditorState extends ConsumerState<Editor>{
       final look={'icon':v['icon'],'color':v['color']};
       final RowData record;
       if(tx){
-        record={'kind':kind,'amount':minor(f('amount')),'day':v['day'],'account':v['account'],'category':kind=='Transfer'?null:v['category'],'destination':kind=='Transfer'?v['destination']:null,'description':f('description')};
+        record={'kind':kind,'minute':kind=='Expense'?v['minute']:null,'amount':minor(f('amount')),'day':v['day'],'account':v['account'],'category':kind=='Transfer'?null:v['category'],'destination':kind=='Transfer'?v['destination']:null,'description':f('description')};
       }else if(kind=='Account'){
-        record={'name':f('name'),'type':v['type'],'opening':minor(f('opening')),...look};
+        record={'name':f('name'),'type':v['type'],'bank':f('bank'),'expected':minor(f('expected')),'started':v['started']??today,'maturityMinute':v['maturityMinute']??540,'maturity':v['type']=='Fixed deposit'?(v['maturity']??today):null,'opening':minor(f('opening')),...look};
       }else if(kind=='Habit'){
         record={'name':f('name'),'start':v['start'],'days':v['days'],...look};
       }else if(kind=='Task'){
         record={'name':f('name'),'day':v['day'],'priority':v['priority'],'category':f('taskCategory'),'description':f('description')};
       }else{
-        record={'name':f('name'),'category':v['category'],'unit':f('unit'),'day':v['day'],'target':minor(f('target')),'current':minor(f('current')),...look};
+        record={'name':f('name'),'category':v['category'],'baseline':v['category']=='Weight loss'?(widget.row?['baseline']==null||widget.row?['baseline']==0?minor(f('current')):widget.row!['baseline']):0,'unit':v['category']=='Weight loss'?'kg':f('unit'),'day':v['day'],'target':minor(f('target')),'current':minor(f('current')),...look};
       }
+      if(record['category']=='Weight loss' && record['baseline']<=record['target'])throw StateError('Target must be below starting weight');
       await s.save(table,record,id:widget.row?['id'],minute:minute);
       if(mounted) Navigator.pop(context);
     });
@@ -94,6 +96,7 @@ class _EditorState extends ConsumerState<Editor>{
     final widgets=<Widget>[
       if(!tx) field('name',kind=='Task'?'Title':'Name'),
       if(tx)...[
+        if(kind=='Expense')ListTile(title:const Text('Expense time'),subtitle:Text(clock(c,v['minute'])),onTap:()async{final t=await showTimePicker(context:c,initialTime:TimeOfDay.now());if(t!=null)setState(()=>v['minute']=t.hour*60+t.minute);}),
         field('amount','Amount (${s.pref('currency','LKR')})',numeric:true),
         recordPick('account','Account',accounts),
         if(kind=='Transfer')recordPick('destination','Destination account',accounts.where((r)=>r['id']!=v['account']).toList()),
@@ -106,9 +109,14 @@ class _EditorState extends ConsumerState<Editor>{
             await guard(c,() async {await s.save('categories',{'name':name,'kind':kind});if(mounted)setState(()=>v['category']=s.rows('categories').firstWhere((r)=>r['name']==name&&r['kind']==kind)['id']);});
           })],
         field('description','Description (optional)',required:false)],
-      if(kind=='Account')...[pick('type','Account type',['Cash','Bank account','Savings account','Digital wallet']),field('opening','Opening balance',numeric:true,negative:true)],
+      if(kind=='Account')...[pick('type','Account type',['Cash','Bank account','Savings account','Digital wallet','Fixed deposit']),field('opening','Opening balance',numeric:true,negative:true)],
+      if(kind=='Account'&&v['type']=='Fixed deposit')...[
+        field('bank','Bank name'),field('expected','Expected payout',numeric:true),
+        ListTile(title:Text('Start date · ${v['started']??today}'),onTap:()async{final d=await showDatePicker(context:c,initialDate:DateTime.parse(v['started']??today),firstDate:DateTime(1900),lastDate:DateTime.now());if(d!=null)setState(()=>v['started']=dayKey(d));}),
+        ListTile(title:Text('Reminder · ${clock(c,v['maturityMinute']??540)}'),onTap:()async{final t=await showTimePicker(context:c,initialTime:const TimeOfDay(hour:9,minute:0));if(t!=null)setState(()=>v['maturityMinute']=t.hour*60+t.minute);}),
+      ],if(kind=='Account'&&v['type']=='Fixed deposit')ListTile(title:const Text('Maturity date'),subtitle:Text(v['maturity']??today),onTap:()async{final d=await showDatePicker(context:c,initialDate:DateTime.parse(v['maturity']??today),firstDate:DateTime(1900),lastDate:DateTime(2200));if(d!=null)setState(()=>v['maturity']=dayKey(d));}),
       if(kind=='Task')...[field('description','Description (optional)',required:false),field('taskCategory','Category'),pick('priority','Priority',['Low','Medium','High'])],
-      if(kind=='Goal')...[pick('category','Category',['Financial','Personal','Learning','Fitness','Custom']),field('unit','Unit (e.g. LKR, hours)'),field('target','Target',numeric:true),field('current','Current progress',numeric:true)],
+      if(kind=='Goal')...[pick('category','Category',['Financial','Personal','Learning','Fitness','Weight loss','Custom']),if(v['category']!='Weight loss')field('unit','Unit (e.g. LKR, hours)'),note('A unit describes what you measure: kg, hours, books or LKR.'),field('target','Target',numeric:true),field('current','Current progress',numeric:true)],
       if(tx||kind=='Goal'||kind=='Task')ListTile(title:Text(kind=='Goal'?'Deadline':tx?'Date':'Due date'),subtitle:Text(v['day']),trailing:const Icon(Icons.calendar_today_outlined),onTap:date),
       if(kind=='Habit')...[heading('Scheduled days'),Wrap(spacing:6,children:[for(var i=0;i<7;i++)FilterChip(label:Text(weekdays[i]),selected:((v['days'] as int)&(1<<i))!=0,onSelected:(_)=>setState(()=>v['days']=(v['days'] as int)^(1<<i)))])],
       if(kind=='Habit'||kind=='Task') ListTile(title:const Text('Reminder'),subtitle:Text(minute==null?'Off':TimeOfDay(hour:minute!~/60,minute:minute!%60).format(c)),trailing:minute==null?const Icon(Icons.alarm_add):IconButton(tooltip:'Remove reminder',icon:const Icon(Icons.clear),onPressed:()=>setState(()=>minute=null)),

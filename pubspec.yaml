@@ -1,6 +1,6 @@
 name: xtrack
 description: Offline Android personal tracker
-version: 1.0.0+1
+version: 2.0.0+2
 publish_to: none
 environment:
   sdk: '>=3.6.0 <4.0.0'
@@ -26,3 +26,4 @@ flutter:
     - assets/v1.sql
     - assets/v2.sql
     - assets/v3.sql
+    - assets/v4.sql
