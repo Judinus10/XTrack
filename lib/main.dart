@@ -1,5 +1,8 @@
 import 'dart:collection' show IterableExtensions;
 import 'dart:async';
+import 'dart:convert';
+import 'package:csv/csv.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +12,7 @@ import 'core/store.dart';
 import 'core/vault.dart';
 part 'ui/shared.dart';
 part 'features/editor.dart';
+part 'features/life.dart';
 part 'features/personal.dart';
 part 'features/dashboard.dart';
 part 'features/trackers.dart';
@@ -69,12 +73,15 @@ class Shell extends StatefulWidget {
 }
 class _ShellState extends State<Shell>{
   int index=0;
-  @override Widget build(BuildContext c)=>Scaffold(appBar:AppBar(title:Text(['XTrack','Finance','','Habits','Tasks'][index],style:const TextStyle(fontWeight:FontWeight.w800)),
-    actions:[IconButton(tooltip:'Reminders',icon:const Icon(Icons.notifications_none_rounded),onPressed:()=>open(c,const ReminderPage())),
-      IconButton(tooltip:'Settings',icon:const Icon(Icons.tune_rounded),onPressed:()=>open(c,const SettingsPage()))]),
-    body:SafeArea(top:false,child:IndexedStack(index:index,children:const [Dashboard(),Finance(),SizedBox(),HabitPage(),TaskPage()])),
-    bottomNavigationBar:NavigationBar(selectedIndex:index,onDestinationSelected:(i){if(i==2){quick(c);}else{setState(()=>index=i);}},
-      destinations:const [NavigationDestination(icon:Icon(Icons.home_outlined),label:'Home'),NavigationDestination(icon:Icon(Icons.account_balance_wallet_outlined),label:'Finance'),
-      NavigationDestination(icon:CircleAvatar(backgroundColor:green,foregroundColor:Colors.white,radius:17,child:Icon(Icons.add)),label:'Quick Add'),
-      NavigationDestination(icon:Icon(Icons.repeat_rounded),label:'Habits'),NavigationDestination(icon:Icon(Icons.checklist_rounded),label:'Tasks')]));
+  static const titles=['Home','Finance','Planner','Personal','More'];
+  static const symbols=[Icons.home_outlined,Icons.account_balance_wallet_outlined,Icons.calendar_month_outlined,Icons.person_outline,Icons.more_horiz];
+  DateTime selected=DateTime.now();
+  @override Widget build(BuildContext c)=>Scaffold(
+    appBar:AppBar(title:Text(index==0?'XTrack':titles[index],style:const TextStyle(fontWeight:FontWeight.w800)),actions:[
+      IconButton(tooltip:'Search',onPressed:()=>open(c,const SearchRecords()),icon:const Icon(Icons.search)),
+      IconButton(tooltip:'Reminders',onPressed:()=>open(c,const ReminderPage()),icon:const Icon(Icons.notifications_none))]),
+    body:SafeArea(child:IndexedStack(index:index,children:[const Dashboard(),const Finance(),Planner(selected,(d)=>setState(()=>selected=d)),const LifeHub(),const MoreHub()])),
+    floatingActionButton:index==4?null:FloatingActionButton.small(tooltip:'Quick Add',onPressed:()=>addMenu(c,index,selected),child:const Icon(Icons.add)),
+    bottomNavigationBar:NavigationBar(selectedIndex:index,onDestinationSelected:(i)=>setState(()=>index=i),destinations:[
+      for(var i=0;i<titles.length;i++)NavigationDestination(icon:Icon(symbols[i]),label:titles[i])]));
 }

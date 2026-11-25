@@ -21,16 +21,17 @@ class MainActivity : FlutterFragmentActivity() {
         MethodChannel(engine.dartExecutor.binaryMessenger, "xtrack/device").setMethodCallHandler { call, reply ->
             when (call.method) {
                 "zone" -> reply.success(TimeZone.getDefault().id)
-                "save", "open" -> {
+                "report", "save", "open" -> {
                     if (pending != null) { reply.error("busy","File picker is open",null); return@setMethodCallHandler }
-                    val save = call.method == "save"
+                    val report = call.method == "report"
+                    val save = call.method != "open"
                     val intent = Intent(if (save) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT)
                     intent.addCategory(Intent.CATEGORY_OPENABLE)
                     intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true)
-                    intent.type = if (save) "application/octet-stream" else "*/*"
-                    if (save) intent.putExtra(Intent.EXTRA_TITLE, "XTrack.xtb")
+                    intent.type = if (report) call.argument<String>("mime") else if (save) "application/octet-stream" else "*/*"
+                    if (save) intent.putExtra(Intent.EXTRA_TITLE, if (report) call.argument<String>("name") else "XTrack.xtb")
                     pending = reply
-                    payload = call.arguments as? ByteArray
+                    payload = if (report) call.argument<ByteArray>("bytes") else call.arguments as? ByteArray
                     try { startActivityForResult(intent, if (save) 701 else 702) }
                     catch (e: Exception) { pending = null; payload = null; reply.error("picker",e.message,null) }
                 }

@@ -1,6 +1,7 @@
 part of '../main.dart';
 class Editor extends ConsumerStatefulWidget{
-  const Editor({super.key,required this.kind,this.row});
+  const Editor({super.key,required this.kind,this.row,this.initialDay});
+  final String? initialDay;
   final String kind;
   final RowData? row;
   @override ConsumerState<Editor> createState()=>_EditorState();
@@ -17,7 +18,7 @@ class _EditorState extends ConsumerState<Editor>{
   @override void initState(){
     super.initState();
     final s=ref.read(storeProvider);
-    v={ 'day':today,'type':'Cash','start':today,'days':127,'priority':'Medium','icon':'Leaf','color':'Green',
+    v={ 'day':widget.initialDay??today,'type':'Cash','start':today,'days':127,'priority':'Medium','icon':'Leaf','color':'Green',
       'category':kind=='Goal'?'Personal':kind=='Task'?'Personal':null,...?widget.row};
     for(final key in ['name','description','amount','opening','unit','current','target','expected','bank','taskCategory']){
       final raw=key=='taskCategory'?v['category']:v[key];
@@ -26,6 +27,7 @@ class _EditorState extends ConsumerState<Editor>{
       fields[key]=TextEditingController(text:initial);
     }
     if(kind=='Expense' && widget.row==null)v['minute']=DateTime.now().hour*60+DateTime.now().minute;
+    v['stage']??='To Do';
     if(kind=='Account'&&widget.row==null)v['icon']='Wallet';
     if(kind=='Goal'&&widget.row==null)v['icon']='Flag';
     if(widget.row!=null && (kind=='Habit'||kind=='Task')){
@@ -69,11 +71,12 @@ class _EditorState extends ConsumerState<Editor>{
       }else if(kind=='Habit'){
         record={'name':f('name'),'start':v['start'],'days':v['days'],...look};
       }else if(kind=='Task'){
-        record={'name':f('name'),'day':v['day'],'priority':v['priority'],'category':f('taskCategory'),'description':f('description')};
+        record={'name':f('name'),'day':v['day'],'startMinute':v['startMinute'],'endMinute':v['endMinute'],'project':v['project'],'stage':v['stage']??'To Do','priority':v['priority'],'category':f('taskCategory'),'description':f('description')};
       }else{
         record={'name':f('name'),'category':v['category'],'baseline':v['category']=='Weight loss'?(widget.row?['baseline']==null||widget.row?['baseline']==0?minor(f('current')):widget.row!['baseline']):0,'unit':v['category']=='Weight loss'?'kg':f('unit'),'day':v['day'],'target':minor(f('target')),'current':minor(f('current')),...look};
       }
       if(record['category']=='Weight loss' && record['baseline']<=record['target'])throw StateError('Target must be below starting weight');
+      if(kind=='Task'&&v['endMinute']!=null&&(v['startMinute']==null||v['endMinute']<=v['startMinute']))throw StateError('End time must follow start time');
       await s.save(table,record,id:widget.row?['id'],minute:minute);
       if(mounted) Navigator.pop(context);
     });
@@ -116,12 +119,17 @@ class _EditorState extends ConsumerState<Editor>{
         ListTile(title:Text('Reminder · ${clock(c,v['maturityMinute']??540)}'),onTap:()async{final t=await showTimePicker(context:c,initialTime:const TimeOfDay(hour:9,minute:0));if(t!=null)setState(()=>v['maturityMinute']=t.hour*60+t.minute);}),
       ],if(kind=='Account'&&v['type']=='Fixed deposit')ListTile(title:const Text('Maturity date'),subtitle:Text(v['maturity']??today),onTap:()async{final d=await showDatePicker(context:c,initialDate:DateTime.parse(v['maturity']??today),firstDate:DateTime(1900),lastDate:DateTime(2200));if(d!=null)setState(()=>v['maturity']=dayKey(d));}),
       if(kind=='Task')...[field('description','Description (optional)',required:false),field('taskCategory','Category'),pick('priority','Priority',['Low','Medium','High'])],
-      if(kind=='Goal')...[pick('category','Category',['Financial','Personal','Learning','Fitness','Weight loss','Custom']),if(v['category']!='Weight loss')field('unit','Unit (e.g. LKR, hours)'),note('A unit describes what you measure: kg, hours, books or LKR.'),field('target','Target',numeric:true),field('current','Current progress',numeric:true)],
+      if(kind=='Task')...[
+        pick('stage','Status',['To Do','In Progress']),
+        DropdownButtonFormField<int>(value:v['project'],decoration:const InputDecoration(labelText:'Project'),items:[const DropdownMenuItem<int>(value:null,child:Text('No project')),for(final p in s.rows('projects'))DropdownMenuItem<int>(value:p['id'],child:Text(p['name']))],onChanged:(id)=>setState(()=>v['project']=id)),
+        for(final key in ['startMinute','endMinute'])ListTile(title:Text(key=='startMinute'?'Start time':'End time'),subtitle:Text(clock(c,v[key])),onTap:()async{final t=await showTimePicker(context:c,initialTime:TimeOfDay.now());if(t!=null)setState(()=>v[key]=t.hour*60+t.minute);})
+      ],if(kind=='Goal')...[pick('category','Category',['Financial','Personal','Learning','Fitness','Weight loss','Custom']),if(v['category']!='Weight loss')field('unit','Unit (e.g. LKR, hours)'),note('A unit describes what you measure: kg, hours, books or LKR.'),field('target','Target',numeric:true),field('current','Current progress',numeric:true)],
       if(tx||kind=='Goal'||kind=='Task')ListTile(title:Text(kind=='Goal'?'Deadline':tx?'Date':'Due date'),subtitle:Text(v['day']),trailing:const Icon(Icons.calendar_today_outlined),onTap:date),
       if(kind=='Habit')...[heading('Scheduled days'),Wrap(spacing:6,children:[for(var i=0;i<7;i++)FilterChip(label:Text(weekdays[i]),selected:((v['days'] as int)&(1<<i))!=0,onSelected:(_)=>setState(()=>v['days']=(v['days'] as int)^(1<<i)))])],
       if(kind=='Habit'||kind=='Task') ListTile(title:const Text('Reminder'),subtitle:Text(minute==null?'Off':TimeOfDay(hour:minute!~/60,minute:minute!%60).format(c)),trailing:minute==null?const Icon(Icons.alarm_add):IconButton(tooltip:'Remove reminder',icon:const Icon(Icons.clear),onPressed:()=>setState(()=>minute=null)),
         onTap:() async {final t=await showTimePicker(context:c,initialTime:minute==null?const TimeOfDay(hour:9,minute:0):TimeOfDay(hour:minute!~/60,minute:minute!%60));if(t!=null&&mounted)setState(()=>minute=t.hour*60+t.minute);}),
       if(!tx&&kind!='Task')...[pick('icon','Icon',icons.keys.toList()),pick('color','Color',colors.keys.toList())],
+      if(widget.row!=null && (kind=='Task'||kind=='Goal'))CheckItems(kind,widget.row!['id']),
       FilledButton(onPressed:busy?null:save,child:Text(widget.row==null?'Create $kind':'Save changes')),
       if(widget.row!=null && ['Account','Habit'].contains(kind))OutlinedButton(onPressed:busy?null:()=>action(true),child:Text(widget.row!['archived']==1?'Unarchive':'Archive')),
       if(widget.row!=null && kind!='Account')TextButton(onPressed:busy?null:()=>action(false),child:const Text('Delete record',style:TextStyle(color:red)))];

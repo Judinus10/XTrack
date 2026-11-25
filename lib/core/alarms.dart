@@ -10,12 +10,17 @@ import 'vault.dart';
 
 @pragma('vm:entry-point')
 Future<void> snoozeAction(NotificationResponse response) async {
-  if(!['later10','later30'].contains(response.actionId)||response.payload==null)return;
+  if(!['later5','later10','later15','later30','later60','complete'].contains(response.actionId)||response.payload==null)return;
   WidgetsFlutterBinding.ensureInitialized();
   final p=jsonDecode(response.payload!);
   final store=Store();
   await store.init();
-  final fire=DateTime.now().add(Duration(minutes:response.actionId=='later10'?10:30));
+  if(response.actionId=='complete'){
+    if(p[3]=='tasks')await store.change('tasks',p[4],{'completed':today});
+    if(p[3]=='habits' && !store.rows('habit_logs').any((r)=>r['habit']==p[4]&&r['day']==today))await store.log(p[4],today);
+    return;
+  }
+  final fire=DateTime.now().add(Duration(minutes:int.parse(response.actionId!.substring(5))));
   await store.write((t)async{
     await t.rawInsert('INSERT OR REPLACE INTO snoozes(id,fire,title,body,owner,ownerId) VALUES(?,?,?,?,?,?)',[p[0],fire.millisecondsSinceEpoch,p[1],p[2],p[3],p[4]]);
   },reschedule:true);
@@ -41,7 +46,8 @@ class Alarms {
     final zone=tz.getLocation(zoneName??'UTC');
     final now=tz.TZDateTime.now(zone);
     const details=NotificationDetails(android:AndroidNotificationDetails('xtrack_reminders','Tracker reminders',importance:Importance.high,priority:Priority.high));
-    const actionable=NotificationDetails(android:AndroidNotificationDetails('xtrack_actions','Actionable reminders',importance:Importance.high,priority:Priority.high,actions:[AndroidNotificationAction('later10','Snooze 10 min'),AndroidNotificationAction('later30','Snooze 30 min')]));
+    final snooze=data['settings']!.where((r)=>r['key']=='snooze').firstOrNull?['value']??'10';
+    final actionable=NotificationDetails(android:AndroidNotificationDetails('xtrack_actions','Actionable reminders',importance:Importance.high,priority:Priority.high,actions:[AndroidNotificationAction('later$snooze','Snooze $snooze min')]));
     for(final r in data['snoozes']!){
       final at=tz.TZDateTime.fromMillisecondsSinceEpoch(zone,r['fire']);
       if(!at.isAfter(now))continue;
@@ -77,7 +83,7 @@ class Alarms {
         final at=tz.TZDateTime(zone,d.year,d.month,d.day,minute~/60,minute%60);
         if(!at.isAfter(now) || (habit && (!scheduled(owner,d) || (offset==7 && minute>now.hour*60+now.minute)))) continue;
         await plugin.zonedSchedule((r['id'] as int)*8+(habit?d.weekday:0),habit?'Habit due':'Task due',
-          owner['name'] as String,at,actionable,payload:jsonEncode([(r['id'] as int)*8+(habit?d.weekday:0),habit?'Habit due':'Task due',owner['name'],habit?'habits':'tasks',owner['id']]),
+          owner['name'] as String,at,NotificationDetails(android:AndroidNotificationDetails('xtrack_actions','Actionable reminders',importance:Importance.high,actions:[const AndroidNotificationAction('complete','Complete'),AndroidNotificationAction('later$snooze','Snooze $snooze min')])),payload:jsonEncode([(r['id'] as int)*8+(habit?d.weekday:0),habit?'Habit due':'Task due',owner['name'],habit?'habits':'tasks',owner['id']]),
           androidScheduleMode:AndroidScheduleMode.inexactAllowWhileIdle,
           matchDateTimeComponents:habit?DateTimeComponents.dayOfWeekAndTime:null);
       }

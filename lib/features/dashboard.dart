@@ -16,13 +16,17 @@ class Dashboard extends ConsumerWidget{
     final done=habits.where((h)=>logs(s,h).contains(today)).length;
     final tasks=s.rows('tasks').where((r)=>r['day']==today&&r['completed']==null);
     final goals=s.rows('goals').where((r)=>r['category']=='Weight loss'?r['current']>r['target']:r['current']<r['target']);
-    return feed([Text(now.hour<12?'Good morning':now.hour<18?'Good afternoon':'Good evening',style:Theme.of(c).textTheme.headlineSmall?.copyWith(fontWeight:FontWeight.bold)),
-      link('Personal measurements',()=>open(c,const Personal())),note('${weekdays[now.weekday-1]}, ${now.day} ${months[now.month-1]} ${now.year}'),overview(c,s,monthly),
-      panel(c,[heading('This month',action:link('Analytics',()=>open(c,const Analytics()))),cashFlow(s,b)]),
-      panel(c,[heading('Today’s habits'),if(habits.isEmpty)link('Create a habit',()=>edit(c,'Habit')) else ...[note('$done of ${habits.length} completed'),meter(done/habits.length)]]),
-      panel(c,[heading('Today’s tasks',action:link('Add',()=>edit(c,'Task'))),if(tasks.isEmpty)note('No pending tasks due today.'),for(final t in tasks)taskTile(c,s,t)]),
-      panel(c,[heading('Active goals',action:link('View all',()=>open(c,const GoalPage()))),if(goals.isEmpty)link('Set a goal',()=>edit(c,'Goal')),for(final g in goals.take(3))goalTile(c,s,g)]),
-      panel(c,[heading('Recent transactions'),if(all.isEmpty)link('Add an expense',()=>edit(c,'Expense')),for(final r in all.take(5))txTile(c,s,r)])]);
+    final cards=<String,Widget>{
+      'Available balance':overview(c,s,monthly),
+      'Daily overview':metricGrid(c,{'Tasks today':'${tasks.length} pending','Habit completion':'$done / ${habits.length}'}),
+      'Schedule':panel(c,[heading('Today’s schedule'),if(tasks.isEmpty)note('No pending tasks today.'),for(final t in tasks)taskTile(c,s,t)]),
+      'Cash flow':panel(c,[heading('Cash flow',action:link('Analytics',()=>open(c,const Analytics()))),cashFlow(s,b)]),
+      'Goals':panel(c,[heading('Active goals',action:link('View all',()=>open(c,const GoalPage()))),if(goals.isEmpty)link('Set a goal',()=>edit(c,'Goal')),for(final g in goals.take(3))goalTile(c,s,g)]),
+      'Transactions':panel(c,[heading('Recent transactions'),if(all.isEmpty)note('No transactions yet.'),for(final r in all.take(5))txTile(c,s,r)])
+    };
+    final order=s.pref('cards',cards.keys.join('|')).split('|').where(cards.containsKey).toList();
+    return feed([heading(now.hour<12?'Good morning':now.hour<18?'Good afternoon':'Good evening',action:IconButton(tooltip:'Customize dashboard',icon:const Icon(Icons.tune),onPressed:()=>open(c,CardSettings(cards.keys.toList())))),
+      note('${weekdays[now.weekday-1]}, ${now.day} ${months[now.month-1]} ${now.year}'),for(final key in order)cards[key]!]);
   }
 }
 class Finance extends ConsumerStatefulWidget{
@@ -37,7 +41,7 @@ class _FinanceState extends ConsumerState<Finance>{
     final rows=recent(s).where((r)=>period=='All'||within(r['day'],b.first.start,b.last.end)).toList();
     final found=rows.where((r)=>(kind=='All'||kind==r['kind']) && [r['description'],r['kind'],r['day'],label(s,'categories',r['category']),label(s,'accounts',r['account']),label(s,'accounts',r['destination'])].join(' ').toLowerCase().contains(query.toLowerCase()));
     final accounts=s.rows('accounts').where((r)=>archived||r['archived']==0);
-    return feed([filters(['Week','Month','Year','All'],period,(v)=>setState(()=>period=v)),const SizedBox(height:10),overview(c,s,rows),
+    return feed([Wrap(children:[link('Budgets',()=>open(c,const Records('Budget'))),link('Investments and assets',()=>open(c,const Records('Asset'))),link('Loans and schedules',()=>open(c,const FinanceTools()))]),filters(['Week','Month','Year','All'],period,(v)=>setState(()=>period=v)),const SizedBox(height:10),overview(c,s,rows),
       panel(c,[heading('Accounts',action:link('Add account',()=>edit(c,'Account'))),if(accounts.isEmpty)note('Create your first account.'),
         for(final a in accounts.where((a)=>a['type']!='Fixed deposit')) ListTile(contentPadding:EdgeInsets.zero,leading:badge(a),title:Text(a['name']),subtitle:Text(a['archived']==1?'Archived':a['type']),trailing:Text(s.money(s.balance(a))),onTap:()=>edit(c,'Account',a)),
         if(accounts.any((a)=>a['type']=='Fixed deposit'))heading('Fixed deposits'),

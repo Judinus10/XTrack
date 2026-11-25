@@ -99,7 +99,7 @@ class _SettingsState extends ConsumerState<SettingsPage>{
       await s.restore(decoded);
     }else{
       if(await prompt(context,'Confirm backup passphrase',secret:true)!=pass)throw StateError('Passphrases did not match');
-      final encrypted=await Vault.seal(pass,{'version':4,'data':s.data});
+      final encrypted=await Vault.seal(pass,{'version':5,'data':s.data});
       if(encrypted.length>32*1024*1024)throw StateError('Backup exceeds 32 MB');
       if(await Vault.device.invokeMethod<bool>('save',encrypted)!=true)return;
     }
@@ -112,7 +112,7 @@ class _SettingsState extends ConsumerState<SettingsPage>{
     return Scaffold(appBar:AppBar(title:const Text('Settings')),body:SafeArea(child:AbsorbPointer(absorbing:busy,child:feed([
       if(busy)const LinearProgressIndicator(),
       panel(c,[heading('Appearance'),setting('Theme','theme',['system','light','dark'],'system'),setting('Currency label','currency',['LKR','USD','EUR','GBP','INR'],'LKR'),note('Changing the label keeps the recorded amounts.')]),
-      panel(c,[heading('Reminders'),SwitchListTile(title:const Text('Enable reminders'),value:s.pref('notifications','0')=='1',onChanged:(v)=>run(()=>remindersEnabled(c,s,v))),if(s.reminderError!=null)note(s.reminderError!)]),
+      panel(c,[heading('Reminders'),setting('Snooze minutes','snooze',['5','10','15','30','60'],'10'),SwitchListTile(title:const Text('Enable reminders'),value:s.pref('notifications','0')=='1',onChanged:(v)=>run(()=>remindersEnabled(c,s,v))),if(s.reminderError!=null)note(s.reminderError!)]),
       panel(c,[heading('Security'),SwitchListTile(title:const Text('Application pattern'),value:s.hasPin,onChanged:(v)=>run(()=>pin(s,v))),
         if(s.hasPin)...[link('Change pattern',()=>run(()=>pin(s,true))),SwitchListTile(title:const Text('Biometric unlock'),value:s.bio,onChanged:(v)=>run(()async {
           if(!await verify(s))return;
@@ -125,6 +125,6 @@ class _SettingsState extends ConsumerState<SettingsPage>{
           if(!await verify(s)||!c.mounted||!await confirm(c,'Reset XTrack?','Delete all records, preferences, PIN and reminders on this device?'))return;
           await s.reset();for(final k in ['bio','attempts','pin']){await Vault.storage.delete(key:k);}s.hasPin=false;s.bio=false;await s.refresh();
         }))]),
-      panel(c,[heading('XTrack'),note('Version 2.0.0 · Offline personal tracker')])] ))));
+      panel(c,[heading('XTrack'),note('Version 3.0.0 · Offline personal tracker')])] ))));
   }
 }

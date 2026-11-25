@@ -67,7 +67,7 @@ class _AnalyticsState extends ConsumerState<Analytics>{
     final goals=s.rows('goals').where((r)=>within(r['day'],b.first.start,b.last.end)).toList();
     return Scaffold(appBar:AppBar(title:const Text('Analytics')),body:SafeArea(child:feed([
       filters(['Week','Month','Year'],period,(v)=>setState(()=>period=v)),const SizedBox(height:12),
-      panel(c,[heading('Income vs expenses'),cashFlow(s,b)]),panel(c,[heading('Expenses by category'),donut(s,records)]),
+      panel(c,[heading('Income vs expenses'),cashFlow(s,b)]),metricGrid(c,{'Income':s.money(total(records,'Income')),'Expenses':s.money(total(records,'Expense')),'Savings':s.money(total(records,'Income')-total(records,'Expense')),'Transactions':'${records.length}'}),panel(c,[heading('Expenses by category'),donut(s,records)]),
       panel(c,[heading('Balance trend'),if(s.pref('hidden','0')=='1')note('Balances hidden') else if(spots.every((p)=>p.y==0)&&records.isEmpty)note('No balance activity yet.') else ...[
         note('Closing balance · ${s.money((spots.last.y*100).round())}'),
         SizedBox(height:145,child:LineChart(LineChartData(minX:0,maxX:(b.length-1).toDouble(),titlesData:axis(labels),gridData:const FlGridData(show:false),borderData:FlBorderData(show:false),lineBarsData:[LineChartBarData(spots:spots,color:green,barWidth:3,dotData:const FlDotData(show:true))])))] ]),

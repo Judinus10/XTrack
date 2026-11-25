@@ -10,7 +10,7 @@ import 'alarms.dart';
 part 'demo.dart';
 
 final storeProvider=ChangeNotifierProvider<Store>((ref)=>throw StateError('Store not initialized'));
-const tables=['categories','accounts','transactions','habits','habit_schedules','habit_logs','tasks','goals','reminders','custom_reminders','measurements','snoozes','settings'];
+const tables=['categories','accounts','transactions','habits','habit_schedules','habit_logs','projects','tasks','goals','reminders','custom_reminders','measurements','snoozes','personal_logs','budgets','focus_sessions','valuations','loans','repayments','recurring','occurrences','deleted_records','subtasks','milestones','settings'];
 class Store extends ChangeNotifier {
   late Database db;
   final alarms=Alarms();
@@ -25,7 +25,7 @@ class Store extends ChangeNotifier {
       key=base64UrlEncode(Vault.random(32));
       await Vault.storage.write(key:'database',value:key);
     }
-    db=await openDatabase('${await getDatabasesPath()}/xtrack.db',version:4,password:key,
+    db=await openDatabase('${await getDatabasesPath()}/xtrack.db',version:5,password:key,
       onConfigure:(d)=>d.execute('PRAGMA foreign_keys=ON'),
       onCreate:(d,v)=>migrate(d,0,v),onUpgrade:migrate);
     hasPin=await Vault.storage.containsKey(key:'pin');
@@ -49,6 +49,27 @@ class Store extends ChangeNotifier {
     return "${pref('currency','LKR')} $grouped.${parts.last}";
   }
   Future<void> refresh() async {
+    await db.transaction((t)async{
+      await t.delete('deleted_records',where:'removed<?',whereArgs:[dayKey(shift(DateTime.now(),-30))]);
+      for(final rule in await t.query('recurring',where:'paused=0 AND next<=?',whereArgs:[today])){
+        var d=DateTime.parse(rule['next'] as String);
+        while(dayKey(d).compareTo(today)<=0){
+          final day=dayKey(d);
+          final existing=await t.query('occurrences',where:'rule=? AND day=?',whereArgs:[rule['id'],day]);
+          if(existing.isEmpty){
+            await t.insert('occurrences',{'rule':rule['id'],'day':day});
+            await t.insert('transactions',{'day':day,'kind':rule['kind'],'amount':rule['amount'],'account':rule['account'],'category':rule['category'],'description':rule['name']});
+          }
+          final freq=rule['frequency'];
+          if(freq=='Monthly'||freq=='Yearly'){
+            final m=DateTime(d.year,d.month+(freq=='Monthly'?1:12));
+            final last=DateTime(m.year,m.month+1,0).day;
+            d=DateTime(m.year,m.month,(rule['anchor'] as int).clamp(1,last).toInt());
+          }else{d=shift(d,freq=='Weekly'?7:(rule['intervalDays'] as int));}
+        }
+        await t.update('recurring',{'next':dayKey(d)},where:'id=?',whereArgs:[rule['id']]);
+      }
+    });
     final snapshot=await db.transaction((t) async {
       final records={for(final name in tables) name:await t.query(name)};
       return (records,await t.query('ledger_entries'));
@@ -81,7 +102,7 @@ class Store extends ChangeNotifier {
   }
   Future<void> setting(String key,String value)=>write((t) async {
     await t.insert('settings',{'key':key,'value':value},conflictAlgorithm:ConflictAlgorithm.replace);
-  },reschedule:key=='notifications');
+  },reschedule:key=='notifications'||key=='snooze');
   Future<void> save(String table,RowData record,{int? id,int? minute})=>write((t) async {
     if(id!=null)await t.delete('snoozes',where:'owner=? AND ownerId=?',whereArgs:[table,id]);
     if(id==null){id=await t.insert(table,record);} else {await t.update(table,record,where:'id=?',whereArgs:[id]);}
@@ -106,7 +127,24 @@ class Store extends ChangeNotifier {
       await t.insert('habit_schedules',{'habit':id,'day':today,'days':fields['archived']==1?0:row['days']},conflictAlgorithm:ConflictAlgorithm.replace);
     }
   },reschedule:['habits','tasks','accounts','custom_reminders'].contains(table));
-  Future<void> remove(String table,int id)=>write((t) async {await t.delete(table,where:'id=?',whereArgs:[id]);},reschedule:true);
+  Future<void> remove(String table,int id)=>write((t) async {final rows=await t.query(table,where:'id=?',whereArgs:[id]);
+    if(rows.isEmpty)return;
+    if(['transactions','personal_logs','budgets','valuations','goals','tasks','habits'].contains(table)){
+      final bundle=<String,dynamic>{table:rows};
+      if(table=='tasks'||table=='habits')bundle['reminders']=await t.query('reminders',where:table=='tasks'?'task=?':'habit=?',whereArgs:[id]);
+      if(table=='tasks')bundle['subtasks']=await t.query('subtasks',where:'task=?',whereArgs:[id]);
+      if(table=='goals')bundle['milestones']=await t.query('milestones',where:'goal=?',whereArgs:[id]);
+      if(table=='habits')for(final child in ['habit_schedules','habit_logs']){bundle[child]=await t.query(child,where:'habit=?',whereArgs:[id]);}
+      await t.insert('deleted_records',{'title':rows.first['name']??rows.first['kind']??table,'source':table,'removed':today,'payload':jsonEncode(bundle)});
+    }
+    await t.delete(table,where:'id=?',whereArgs:[id]);},reschedule:true);
+  Future<void> recover(RowData deleted)=>write((t)async{
+    final bundle=jsonDecode(deleted['payload']) as Map;
+    for(final name in tables.where(bundle.containsKey)){
+      for(final row in bundle[name]){await t.insert(name,Map<String,Object?>.from(row));}
+    }
+    await t.delete('deleted_records',where:'id=?',whereArgs:[deleted['id']]);
+  },reschedule:true);
   Future<void> log(int habit,String day)=>write((t) async {
     final h=(await t.query('habits',where:'id=?',whereArgs:[habit])).single;
     if(h['archived']==1||day.compareTo(today)>0||!scheduled({...h,'history':await t.query('habit_schedules',where:'habit=?',whereArgs:[habit])},DateTime.parse(day))) throw StateError('Outside habit schedule');
@@ -118,9 +156,10 @@ class Store extends ChangeNotifier {
     .where((r)=>r['account_id']==a['id']&&(until==null||(r['day'] as String).compareTo(until)<=0))
     .fold<int>(0,(n,r)=>n+(r['delta'] as int));
   Future<void> restore(dynamic backup)=>write((t) async {
-    if(backup is! Map || ![3,4].contains(backup['version'])) throw const FormatException('Unsupported backup version');
+    if(backup is! Map || ![3,4,5].contains(backup['version'])) throw const FormatException('Unsupported backup version');
     final records=backup['data'];
     if(backup['version']==3 && records is Map){records['custom_reminders']=[];records['measurements']=[];records['snoozes']=[];}
+    if(backup['version']<5 && records is Map){for(final name in ['projects','personal_logs','budgets','focus_sessions','valuations','loans','repayments','recurring','occurrences','deleted_records','subtasks','milestones']){records[name]=[];}}
     if(records is! Map || tables.any((name)=>records[name] is! List)){
       throw const FormatException('Backup is missing a record group');
     }
