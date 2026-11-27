@@ -99,7 +99,7 @@ class _SettingsState extends ConsumerState<SettingsPage>{
       await s.restore(decoded);
     }else{
       if(await prompt(context,'Confirm backup passphrase',secret:true)!=pass)throw StateError('Passphrases did not match');
-      final encrypted=await Vault.seal(pass,{'version':5,'data':s.data});
+      final encrypted=await Vault.seal(pass,{'version':6,'data':s.data});
       if(encrypted.length>32*1024*1024)throw StateError('Backup exceeds 32 MB');
       if(await Vault.device.invokeMethod<bool>('save',encrypted)!=true)return;
     }

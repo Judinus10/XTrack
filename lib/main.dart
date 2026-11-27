@@ -14,6 +14,7 @@ part 'ui/shared.dart';
 part 'features/editor.dart';
 part 'features/life.dart';
 part 'features/personal.dart';
+part 'features/workouts.dart';
 part 'features/dashboard.dart';
 part 'features/trackers.dart';
 part 'features/analytics.dart';

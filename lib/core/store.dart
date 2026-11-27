@@ -10,7 +10,7 @@ import 'alarms.dart';
 part 'demo.dart';
 
 final storeProvider=ChangeNotifierProvider<Store>((ref)=>throw StateError('Store not initialized'));
-const tables=['categories','accounts','transactions','habits','habit_schedules','habit_logs','projects','tasks','goals','reminders','custom_reminders','measurements','snoozes','personal_logs','budgets','focus_sessions','valuations','loans','repayments','recurring','occurrences','deleted_records','subtasks','milestones','settings'];
+const tables=['categories','accounts','transactions','habits','habit_schedules','habit_logs','projects','tasks','goals','reminders','custom_reminders','measurements','snoozes','personal_logs','exercise_catalog','workout_templates','template_exercises','workout_sessions','workout_session_exercises','workout_sets','budgets','focus_sessions','valuations','loans','repayments','recurring','occurrences','deleted_records','subtasks','milestones','settings'];
 class Store extends ChangeNotifier {
   late Database db;
   final alarms=Alarms();
@@ -25,9 +25,10 @@ class Store extends ChangeNotifier {
       key=base64UrlEncode(Vault.random(32));
       await Vault.storage.write(key:'database',value:key);
     }
-    db=await openDatabase('${await getDatabasesPath()}/xtrack.db',version:5,password:key,
+    db=await openDatabase('${await getDatabasesPath()}/xtrack.db',version:6,password:key,
       onConfigure:(d)=>d.execute('PRAGMA foreign_keys=ON'),
       onCreate:(d,v)=>migrate(d,0,v),onUpgrade:migrate);
+    await ensureDailyHealthHabits();
     hasPin=await Vault.storage.containsKey(key:'pin');
     bio=await Vault.storage.read(key:'bio')=='1';
     await refresh();
@@ -39,6 +40,14 @@ class Store extends ChangeNotifier {
       for(final stmt in sql.split(';').where((s)=>s.trim().isNotEmpty)) {await db.execute(stmt);}
     }
   }
+  Future<void> ensureDailyHealthHabits()=>db.transaction((t)async{
+    for(final item in [('Gym','Fitness'),('Reading','Book')]){
+      final existing=await t.query('habits',where:'lower(name)=?',whereArgs:[item.$1.toLowerCase()],limit:1);
+      if(existing.isNotEmpty)continue;
+      final id=await t.insert('habits',{'name':item.$1,'icon':item.$2,'color':'Green','days':127,'start':today,'archived':0,'demo':0});
+      await t.insert('habit_schedules',{'habit':id,'day':today,'days':127});
+    }
+  });
   List<RowData> rows(String table)=>data[table]!;
   List<RowData> get habits=>[for(final h in rows('habits')) {...h,'history':rows('habit_schedules').where((r)=>r['habit']==h['id']).toList()}];
   String pref(String key,String fallback)=>rows('settings').where((r)=>r['key']==key).firstOrNull?['value']??fallback;
@@ -156,10 +165,11 @@ class Store extends ChangeNotifier {
     .where((r)=>r['account_id']==a['id']&&(until==null||(r['day'] as String).compareTo(until)<=0))
     .fold<int>(0,(n,r)=>n+(r['delta'] as int));
   Future<void> restore(dynamic backup)=>write((t) async {
-    if(backup is! Map || ![3,4,5].contains(backup['version'])) throw const FormatException('Unsupported backup version');
+    if(backup is! Map || ![3,4,5,6].contains(backup['version'])) throw const FormatException('Unsupported backup version');
     final records=backup['data'];
     if(backup['version']==3 && records is Map){records['custom_reminders']=[];records['measurements']=[];records['snoozes']=[];}
     if(backup['version']<5 && records is Map){for(final name in ['projects','personal_logs','budgets','focus_sessions','valuations','loans','repayments','recurring','occurrences','deleted_records','subtasks','milestones']){records[name]=[];}}
+    if(backup['version']<6 && records is Map){for(final name in ['exercise_catalog','workout_templates','template_exercises','workout_sessions','workout_session_exercises','workout_sets']){records[name]=[];}}
     if(records is! Map || tables.any((name)=>records[name] is! List)){
       throw const FormatException('Backup is missing a record group');
     }

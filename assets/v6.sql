@@ -1,0 +1,11 @@
+ALTER TABLE personal_logs ADD COLUMN minute INTEGER;
+ALTER TABLE personal_logs ADD COLUMN logged_at INTEGER;
+ALTER TABLE measurements ADD COLUMN measured_at INTEGER;
+CREATE TABLE exercise_catalog(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,equipment TEXT NOT NULL DEFAULT '',unit TEXT NOT NULL DEFAULT 'kg',archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE workout_templates(id INTEGER PRIMARY KEY,name TEXT NOT NULL,created INTEGER NOT NULL);
+CREATE TABLE template_exercises(id INTEGER PRIMARY KEY,template INTEGER NOT NULL REFERENCES workout_templates(id) ON DELETE CASCADE,exercise INTEGER NOT NULL REFERENCES exercise_catalog(id),position INTEGER NOT NULL DEFAULT 0,target_sets INTEGER NOT NULL DEFAULT 3,target_reps INTEGER NOT NULL DEFAULT 10,UNIQUE(template,exercise));
+CREATE TABLE workout_sessions(id INTEGER PRIMARY KEY,template INTEGER REFERENCES workout_templates(id) ON DELETE SET NULL,name TEXT NOT NULL,day TEXT NOT NULL,started INTEGER NOT NULL,ended INTEGER,notes TEXT NOT NULL DEFAULT '');
+CREATE TABLE workout_session_exercises(id INTEGER PRIMARY KEY,session INTEGER NOT NULL REFERENCES workout_sessions(id) ON DELETE CASCADE,exercise INTEGER NOT NULL REFERENCES exercise_catalog(id),position INTEGER NOT NULL DEFAULT 0,UNIQUE(session,exercise));
+CREATE TABLE workout_sets(id INTEGER PRIMARY KEY,session INTEGER NOT NULL REFERENCES workout_sessions(id) ON DELETE CASCADE,exercise INTEGER NOT NULL REFERENCES exercise_catalog(id),set_no INTEGER NOT NULL,reps INTEGER NOT NULL CHECK(reps>0),load INTEGER NOT NULL DEFAULT 0 CHECK(load>=0),effort REAL,UNIQUE(session,exercise,set_no));
+CREATE INDEX workout_sessions_day ON workout_sessions(day,started);
+CREATE INDEX workout_sets_exercise ON workout_sets(exercise,session);

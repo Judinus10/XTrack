@@ -28,25 +28,42 @@ class Personal extends ConsumerWidget{
   @override Widget build(BuildContext c,WidgetRef ref){
     final s=ref.watch(storeProvider);
     final rows=[...s.rows('measurements')]..sort((a,b)=>(b['day'] as String).compareTo(a['day']));
-    return Scaffold(appBar:AppBar(title:const Text('Personal')),body:feed([
+    final latest=rows.firstOrNull;
+    return Scaffold(appBar:AppBar(title:const Text('Health & activity')),body:feed([
       panel(c,[heading('Height'),link('${s.pref('height','Set height')} cm',()=>guard(c,()async{
         final value=await prompt(c,'Height in cm');if(value==null)return;
         if((minor(value)??0)<=0)throw StateError('Enter a positive height');
         await s.setting('height',value);
       }))]),
-      panel(c,[heading('Weight history'),link('Log weight',()=>logWeight(c,s)),link('Schedule weight check-ins',()=>customReminder(c,s,title:'Log your weight')),
-      if(rows.length>1)SizedBox(height:120,child:LineChart(LineChartData(titlesData:const FlTitlesData(show:false),lineBarsData:[LineChartBarData(color:green,spots:[for(final r in rows.reversed)FlSpot(DateTime.parse(r['day']).millisecondsSinceEpoch/86400000,r['weight']/100)])]))),
+      panel(c,[heading('Weight'),if(latest!=null)Text('${decimal(latest['weight'])} kg',style:Theme.of(c).textTheme.headlineMedium?.copyWith(fontWeight:FontWeight.bold)),if(latest!=null)note('Latest entry · ${latest['day']}'),FilledButton.icon(onPressed:()=>logWeight(c,s),icon:const Icon(Icons.add),label:const Text('Log weight')),link('Schedule weight check-ins',()=>customReminder(c,s,title:'Log your weight')),
+      if(rows.length>1)...[heading('Weight trend'),weightTrend(rows)],
       if(rows.isEmpty)note('No measurements yet.'),
-      for(final r in rows)ListTile(title:Text('${decimal(r['weight'])} kg'),subtitle:Text(r['day']))])]));
+      for(final r in rows)ListTile(title:Text('${decimal(r['weight'])} kg'),subtitle:Text(r['day']),onTap:()=>logWeight(c,s,record:r))])]));
   }
 }
-Future<void> logWeight(BuildContext c,Store s)=>guard(c,()async{
-  final d=await showDatePicker(context:c,initialDate:DateTime.now(),firstDate:DateTime(1900),lastDate:DateTime.now());
-  if(d==null||!c.mounted)return;
-  final input=await prompt(c,'Weight in kg');if(input==null)return;
-  final n=minor(input);if(n==null||n<=0)throw StateError('Enter a positive weight');
+Widget weightTrend(List<RowData> descending){
+  final rows=descending.reversed.toList();
+  final spots=[for(final r in rows)FlSpot(DateTime.parse(r['day']).millisecondsSinceEpoch/86400000,r['weight']/100)];
+  final minX=spots.first.x,maxX=spots.last.x,span=maxX-minX;
+  final safeMin=span==0?minX-1:minX,safeMax=span==0?maxX+1:maxX;
+  return SizedBox(height:210,child:LineChart(LineChartData(minX:safeMin,maxX:safeMax,gridData:const FlGridData(show:false),borderData:FlBorderData(show:false),
+    titlesData:FlTitlesData(topTitles:const AxisTitles(),rightTitles:const AxisTitles(),leftTitles:AxisTitles(sideTitles:SideTitles(showTitles:true,reservedSize:40,getTitlesWidget:(v,_)=>Text(v.toStringAsFixed(1),style:const TextStyle(fontSize:10)))),bottomTitles:AxisTitles(sideTitles:SideTitles(showTitles:true,reservedSize:26,interval:span<=4?1:span/4,getTitlesWidget:(v,_) {final d=DateTime.fromMillisecondsSinceEpoch((v*86400000).round());return Text('${d.day}/${d.month}',style:const TextStyle(fontSize:10));}))),
+    lineBarsData:[LineChartBarData(spots:spots,color:green,barWidth:3,dotData:const FlDotData(show:true))])));
+}
+Future<void> logWeight(BuildContext c,Store s,{RowData? record})=>guard(c,()async{
+  final controller=TextEditingController(text:record==null?'':decimal(record['weight']));
+  var selectedDay=record?['day']??today;
+  final saved=await showDialog<bool>(context:c,builder:(ctx)=>StatefulBuilder(builder:(ctx,setDialog)=>AlertDialog(title:Text(record==null?'Log weight':'Edit weight'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+    TextField(controller:controller,autofocus:true,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Weight',suffixText:'kg')),
+    Align(alignment:Alignment.centerLeft,child:TextButton.icon(onPressed:()async{final d=await showDatePicker(context:ctx,initialDate:DateTime.parse(selectedDay),firstDate:DateTime(1900),lastDate:DateTime.now());if(d!=null)setDialog(()=>selectedDay=dayKey(d));},icon:const Icon(Icons.calendar_today_outlined),label:Text(selectedDay==today?'Today · Change date':selectedDay)))
+  ]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Cancel')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Save'))])));
+  if(saved!=true||!c.mounted){controller.dispose();return;}
+  final n=minor(controller.text);controller.dispose();
+  if(n==null||n<=0)throw StateError('Enter a positive weight.');
   await s.write((t)async{
-    await t.rawInsert('INSERT OR REPLACE INTO measurements(day,weight) VALUES(?,?)',[dayKey(d),n]);
+    if(record!=null&&record['day']!=selectedDay)await t.delete('measurements',where:'day=?',whereArgs:[record['day']]);
+    final measuredAt=selectedDay==today?DateTime.now().millisecondsSinceEpoch:DateTime.parse('${selectedDay}T12:00:00').millisecondsSinceEpoch;
+    await t.rawInsert('INSERT OR REPLACE INTO measurements(day,weight,measured_at) VALUES(?,?,?)',[selectedDay,n,measuredAt]);
     await t.execute("UPDATE goals SET current=(SELECT weight FROM measurements ORDER BY day DESC LIMIT 1) WHERE category='Weight loss'");
   });
 });

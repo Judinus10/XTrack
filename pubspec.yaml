@@ -30,3 +30,4 @@ flutter:
     - assets/v3.sql
     - assets/v4.sql
     - assets/v5.sql
+    - assets/v6.sql

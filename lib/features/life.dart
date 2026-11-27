@@ -15,6 +15,7 @@ Future<void> addMenu(BuildContext c,int index,DateTime date)async{
   final kind=await choose(c,'Quick Add',options[index]);if(kind==null||!c.mounted)return;
   final s=storeOf(c);
   if(kind=='Log weight'){await logWeight(c,s);return;}
+  if(kind=='Workout'){await open<void>(c,const WorkoutHub());return;}
   if(kind=='Custom reminder'){await customReminder(c,s);return;}
   if(kind=='Account'){
     final type=await choose(c,'Account type',['Cash','Bank account','Savings account','Digital wallet','Fixed deposit']);
@@ -27,11 +28,10 @@ Future<void> addMenu(BuildContext c,int index,DateTime date)async{
 String tableFor(String kind)=>switch(kind){'Budget'=>'budgets','Asset'=>'valuations','Project'=>'projects',_=>'personal_logs'};
 Future<void> entry(BuildContext c,String kind,[RowData? r])async{
   if(kind=='Journal'){await open<void>(c,JournalEditor(row:r));return;}
+  if(kind=='Water'){await waterLog(c,storeOf(c),record:r);return;}
   await guard(c,()async{
   final s=storeOf(c),budget=kind=='Budget',asset=kind=='Asset',project=kind=='Project';
-  final date=await showDatePicker(context:c,initialDate:DateTime.parse(r?['day']??(budget&&r!=null?"${r['month']}-01":today)),firstDate:DateTime(1900),lastDate:DateTime(2200));
-  if(date==null||!c.mounted)return;
-  final day=dayKey(date);
+  final day=r?['day']??(budget&&r!=null?"${r['month']}-01":today);
   Future<int?> number(String title,String key)async{
     final str=await prompt(c,title,initial:r==null?'':decimal(r[key]));if(str==null)return null;
     final n=minor(str);if(n==null||n<0)throw StateError('Enter a non-negative number');return n;
@@ -44,7 +44,7 @@ Future<void> entry(BuildContext c,String kind,[RowData? r])async{
     if(amount==0)throw StateError('Limit must be positive');
     row={'month':day.substring(0,7),'category':category,'amount':amount};
   }else{
-    final name=await prompt(c,kind=='Journal'?'Journal title':kind=='Mood'?'How did you feel?':'$kind name',initial:r?['name']??(units[kind]?.isNotEmpty==true?kind:''));if(name==null||!c.mounted)return;
+    final name=kind=='Sleep'?(r?['name']??'Sleep'):await prompt(c,kind=='Journal'?'Journal title':kind=='Mood'?'How did you feel?':'$kind name',initial:r?['name']??(units[kind]?.isNotEmpty==true?kind:''));if(name==null||!c.mounted)return;
     if(name.isEmpty)throw StateError('Enter a name');
     if(asset){
       final type=await choose(c,'Asset type',['Stocks','Gold','Unit trust','Property','Vehicle','Other']);if(type==null||!c.mounted)return;
@@ -54,7 +54,7 @@ Future<void> entry(BuildContext c,String kind,[RowData? r])async{
     }else{
       int? quantity=0;
       if(units[kind]?.isNotEmpty==true){quantity=await number('Amount in ${units[kind]}','quantity');if(quantity==null||!c.mounted)return;if(quantity==0)throw StateError('Amount must be positive');}
-      final notes=await prompt(c,'Notes (optional)',initial:r?['notes']??'');if(notes==null)return;
+      final notes=kind=='Sleep'&&r==null?'':await prompt(c,'Notes (optional)',initial:r?['notes']??'');if(notes==null)return;
       row={'name':name,'day':day,'notes':notes,if(!project)'kind':kind,if(!project)'quantity':quantity};
     }
   }
@@ -115,13 +115,49 @@ class _FocusState extends ConsumerState<FocusTimer>{
     }),child:Text(active==null?'Start session':'Finish session')),for(final r in rows)ListTile(title:Text(r['name']),subtitle:Text(Duration(milliseconds:(r['ended']??DateTime.now().millisecondsSinceEpoch)-r['started']).toString().split('.').first))]));
   }
 }
-Future<void> quickWater(BuildContext c,Store s,int ml)=>guard(c,()=>s.save('personal_logs',{'kind':'Water','name':'Water','day':today,'quantity':minor('$ml'),'notes':''}));
+Future<void> quickWater(BuildContext c,Store s,int ml)=>guard(c,()=>s.save('personal_logs',{'kind':'Water','name':'Water','day':today,'minute':TimeOfDay.now().hour*60+TimeOfDay.now().minute,'logged_at':DateTime.now().millisecondsSinceEpoch,'quantity':minor('$ml'),'notes':''}));
+Future<void> waterLog(BuildContext c,Store s,{RowData? record})=>guard(c,()async{
+  final amount=TextEditingController(text:record==null?'':decimal(record['quantity']));
+  var minute=record?['minute']??TimeOfDay.now().hour*60+TimeOfDay.now().minute;
+  final saved=await showDialog<bool>(context:c,builder:(ctx)=>StatefulBuilder(builder:(ctx,setDialog)=>AlertDialog(title:Text(record==null?'Log water':'Edit water entry'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+    TextField(controller:amount,autofocus:true,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Amount',suffixText:'ml')),
+    ListTile(contentPadding:EdgeInsets.zero,title:const Text('Time'),subtitle:Text(TimeOfDay(hour:minute~/60,minute:minute%60).format(ctx)),trailing:const Icon(Icons.schedule),onTap:()async{final t=await showTimePicker(context:ctx,initialTime:TimeOfDay(hour:minute~/60,minute:minute%60));if(t!=null)setDialog(()=>minute=t.hour*60+t.minute);})
+  ]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Cancel')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Save'))])));
+  if(saved!=true||!c.mounted){amount.dispose();return;}
+  final qty=minor(amount.text);amount.dispose();if(qty==null||qty<=0)throw StateError('Enter an amount greater than zero.');
+  final day=record?['day']??today;final dt=DateTime.parse(day);
+  final loggedAt=DateTime(dt.year,dt.month,dt.day,minute~/60,minute%60).millisecondsSinceEpoch;
+  await s.save('personal_logs',{'kind':'Water','name':'Water','day':day,'minute':minute,'logged_at':loggedAt,'quantity':qty,'notes':record?['notes']??''},id:record?['id']);
+});
+Future<void> setupDailyHabits(BuildContext c,Store s)=>guard(c,()async{
+  for(final item in [('Gym','Fitness'),('Reading','Book')]){
+    final existing=s.rows('habits').where((h)=>(h['name'] as String).trim().toLowerCase()==item.$1.toLowerCase()).firstOrNull;
+    if(existing==null)await s.save('habits',{'name':item.$1,'icon':item.$2,'color':'Green','days':127,'start':today,'archived':0,'demo':0});
+    else if(existing['archived']==1)await s.change('habits',existing['id'],{'archived':0});
+  }
+});
+Widget waterBars(Store s){
+  final days=[for(var i=6;i>=0;i--)shift(DateTime.now(),-i)];
+  final values=[for(final d in days)s.rows('personal_logs').where((r)=>r['kind']=='Water'&&r['day']==dayKey(d)).fold<int>(0,(v,r)=>v+(r['quantity'] as int))/100];
+  return bars([for(final d in days)weekdays[d.weekday-1]], [values], ['ml'], [Colors.blue],empty:'No water entries this week.');
+}
+Widget healthHabitBars(Store s){
+  final days=[for(var i=6;i>=0;i--)shift(DateTime.now(),-i)];
+  final habits=s.habits.where((h)=>h['archived']==0&&['gym','reading'].contains((h['name'] as String).trim().toLowerCase())).toList();
+  if(habits.isEmpty)return note('Daily check-in history will appear here.');
+  final names=habits.map((h)=>h['name'] as String).toList();
+  final series=[for(final h in habits)[for(final d in days)logs(s,h).contains(dayKey(d))?1.0:0.0]];
+  return bars([for(final d in days)weekdays[d.weekday-1]],series,names,[for(var i=0;i<habits.length;i++)plotColors[i%plotColors.length]],empty:'No check-ins this week.');
+}
 class LifeHub extends ConsumerWidget{
   const LifeHub({super.key});
   @override Widget build(BuildContext c,WidgetRef ref){final s=ref.watch(storeProvider);
     final water=s.rows('personal_logs').where((r)=>r['kind']=='Water'&&r['day']==today).fold<int>(0,(v,r)=>v+(r['quantity'] as int));
-    return feed([panel(c,[heading('Today’s water'),Text('${decimal(water)} ml recorded',style:Theme.of(c).textTheme.titleMedium),const SizedBox(height:8),Wrap(spacing:8,children:[for(final ml in [150,250,500])ActionChip(avatar:const Icon(Icons.water_drop,color:Colors.blue),label:Text('+$ml ml'),onPressed:()=>quickWater(c,s,ml)),ActionChip(label:const Text('Custom amount'),onPressed:()=>entry(c,'Water'))])]),
-      panel(c,[heading('Personal tracking'),destination(c,'Goals',Icons.flag_outlined,const GoalPage()),destination(c,'Height and weight',Icons.monitor_weight_outlined,const Personal()),for(final kind in units.keys)destination(c,kind,kind=='Water'?Icons.water_drop_outlined:kind=='Sleep'?Icons.bedtime_outlined:kind=='Workout'?Icons.fitness_center:Icons.edit_note,Records(kind))])]);
+    final todayHabits=s.habits.where((h)=>h['archived']==0&&['gym','reading'].contains((h['name'] as String).toLowerCase())&&scheduled(h,DateTime.now())).toList();
+    final waterEntries=s.rows('personal_logs').where((r)=>r['kind']=='Water'&&r['day']==today).toList()..sort((a,b)=>((b['minute']??0) as int).compareTo((a['minute']??0) as int));
+    return feed([panel(c,[heading('Today’s check-ins',action:link('Habit settings',()=>open(c,const HabitPage()))),if(todayHabits.isEmpty)note('Add quick daily check-ins for Gym and Reading.'),for(final h in todayHabits)CheckboxListTile(contentPadding:EdgeInsets.zero,title:Text(h['name']),value:logs(s,h).contains(today),onChanged:(_)=>guard(c,()=>s.log(h['id'],today))),if(todayHabits.isEmpty)OutlinedButton.icon(onPressed:()=>setupDailyHabits(c,s),icon:const Icon(Icons.add),label:const Text('Add Gym and Reading')),healthHabitBars(s)]),
+      panel(c,[heading('Today’s water'),Text('${decimal(water)} ml recorded',style:Theme.of(c).textTheme.titleMedium),const SizedBox(height:8),Wrap(spacing:8,children:[for(final ml in [150,250,500])ActionChip(avatar:const Icon(Icons.water_drop,color:Colors.blue),label:Text('+$ml ml'),onPressed:()=>quickWater(c,s,ml)),ActionChip(label:const Text('Custom amount'),onPressed:()=>waterLog(c,s))]),waterBars(s),for(final r in waterEntries)ListTile(dense:true,contentPadding:EdgeInsets.zero,leading:const Icon(Icons.water_drop_outlined,color:Colors.blue),title:Text('${decimal(r['quantity'])} ml'),subtitle:Text(r['minute']==null?'Time not recorded':TimeOfDay(hour:r['minute']~/60,minute:r['minute']%60).format(c)),onTap:()=>waterLog(c,s,record:r),trailing:IconButton(tooltip:'Delete water entry',icon:const Icon(Icons.delete_outline),onPressed:()async{if(await confirm(c,'Delete water entry?','This removes it from today’s total.')&&c.mounted)await guard(c,()=>s.remove('personal_logs',r['id']));}))]),
+      panel(c,[heading('Health & activity'),destination(c,'Weight and height',Icons.monitor_weight_outlined,const Personal()),destination(c,'Workouts',Icons.fitness_center,const WorkoutHub()),destination(c,'Goals',Icons.flag_outlined,const GoalPage()),for(final kind in ['Sleep','Mood','Journal','Body measurement'])destination(c,kind,Icons.edit_note,Records(kind))])]);
   }
 }
 class JournalEditor extends ConsumerStatefulWidget{
