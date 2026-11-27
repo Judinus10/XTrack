@@ -42,6 +42,7 @@ class TaskPage extends ConsumerStatefulWidget{
 }
 class _TaskState extends ConsumerState<TaskPage>{
   String tab='Today',priority='Any priority';
+  bool board=false;
   @override Widget build(BuildContext c){
     final s=ref.watch(storeProvider);
     final list=s.rows('tasks').where((r){
@@ -49,9 +50,12 @@ class _TaskState extends ConsumerState<TaskPage>{
       final diff=(r['day'] as String).compareTo(today);
       return switch(tab){'Completed'=>r['completed']!=null,'Today'=>r['completed']==null&&diff<=0,'Upcoming'=>r['completed']==null&&diff>0,_=>true};
     }).toList()..sort((a,b)=>(a['day'] as String).compareTo(b['day']));
-    return feed([heading('Your tasks',action:link('New task',()=>edit(c,'Task'))),filters(['Today','Upcoming','Completed','All'],tab,(v)=>setState(()=>tab=v)),
-      DropdownButton<String>(value:priority,items:[for(final p in ['Any priority','High','Medium','Low'])DropdownMenuItem(value:p,child:Text(p))],onChanged:(v)=>setState(()=>priority=v!)),
-      panel(c,[if(list.isEmpty)note('No tasks in this view.'),for(final t in list)taskTile(c,s,t)])]);
+    final boardTasks=s.rows('tasks').where((r)=>priority=='Any priority'||r['priority']==priority).toList()..sort((a,b)=>(a['day'] as String).compareTo(b['day']));
+    return feed([heading('Tasks',action:FilledButton.icon(onPressed:()=>edit(c,'Task'),icon:const Icon(Icons.add),label:const Text('Add task'))),
+      SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('List'),icon:Icon(Icons.list)),ButtonSegment(value:true,label:Text('Board'),icon:Icon(Icons.view_column_outlined))],selected:{board},onSelectionChanged:(v)=>setState(()=>board=v.first)),
+      if(!board)...[filters(['Today','Upcoming','Completed','All'],tab,(v)=>setState(()=>tab=v)),DropdownButton<String>(value:priority,items:[for(final p in ['Any priority','High','Medium','Low'])DropdownMenuItem(value:p,child:Text(p))],onChanged:(v)=>setState(()=>priority=v!)),
+        panel(c,[if(list.isEmpty)note('Nothing here yet. Add a task or choose another filter.'),for(final t in list)taskTile(c,s,t)])]
+      else for(final stage in ['To Do','In Progress','Completed'])panel(c,[heading(stage),if(boardTasks.where((t)=>(t['completed']!=null?'Completed':t['stage']??'To Do')==stage).isEmpty)note('No tasks'),for(final t in boardTasks.where((t)=>(t['completed']!=null?'Completed':t['stage']??'To Do')==stage))ListTile(title:Text(t['name']),subtitle:Text(t['day']),onTap:()=>edit(c,'Task',t),trailing:PopupMenuButton<String>(tooltip:'Change status',onSelected:(v)=>guard(c,()=>s.change('tasks',t['id'],{'stage':v=='Completed'?'To Do':v,'completed':v=='Completed'?today:null})),itemBuilder:(_)=>[for(final v in ['To Do','In Progress','Completed'])PopupMenuItem(value:v,child:Text(v))]))])]);
   }
 }
 Widget goalTile(BuildContext c,Store s,RowData g){

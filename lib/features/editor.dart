@@ -1,7 +1,9 @@
 part of '../main.dart';
 class Editor extends ConsumerStatefulWidget{
-  const Editor({super.key,required this.kind,this.row,this.initialDay});
+  const Editor({super.key,required this.kind,this.row,this.initialDay,this.initialProject,this.initialAccountType});
   final String? initialDay;
+  final int? initialProject;
+  final String? initialAccountType;
   final String kind;
   final RowData? row;
   @override ConsumerState<Editor> createState()=>_EditorState();
@@ -18,8 +20,8 @@ class _EditorState extends ConsumerState<Editor>{
   @override void initState(){
     super.initState();
     final s=ref.read(storeProvider);
-    v={ 'day':widget.initialDay??today,'type':'Cash','start':today,'days':127,'priority':'Medium','icon':'Leaf','color':'Green',
-      'category':kind=='Goal'?'Personal':kind=='Task'?'Personal':null,...?widget.row};
+    v={ 'day':widget.initialDay??today,'type':widget.initialAccountType??'Cash','start':today,'days':127,'priority':'Medium','icon':'Leaf','color':'Green',
+      'category':kind=='Goal'?'Personal':kind=='Task'?'Personal':null,'project':widget.initialProject,...?widget.row};
     for(final key in ['name','description','amount','opening','unit','current','target','expected','bank','taskCategory']){
       final raw=key=='taskCategory'?v['category']:v[key];
       final initial=['amount','opening','current','target','expected'].contains(key)?
@@ -130,9 +132,8 @@ class _EditorState extends ConsumerState<Editor>{
         onTap:() async {final t=await showTimePicker(context:c,initialTime:minute==null?const TimeOfDay(hour:9,minute:0):TimeOfDay(hour:minute!~/60,minute:minute!%60));if(t!=null&&mounted)setState(()=>minute=t.hour*60+t.minute);}),
       if(!tx&&kind!='Task')...[pick('icon','Icon',icons.keys.toList()),pick('color','Color',colors.keys.toList())],
       if(widget.row!=null && (kind=='Task'||kind=='Goal'))CheckItems(kind,widget.row!['id']),
-      FilledButton(onPressed:busy?null:save,child:Text(widget.row==null?'Create $kind':'Save changes')),
       if(widget.row!=null && ['Account','Habit'].contains(kind))OutlinedButton(onPressed:busy?null:()=>action(true),child:Text(widget.row!['archived']==1?'Unarchive':'Archive')),
       if(widget.row!=null && kind!='Account')TextButton(onPressed:busy?null:()=>action(false),child:const Text('Delete record',style:TextStyle(color:red)))];
-    return Scaffold(appBar:AppBar(title:Text('${widget.row==null?'New':'Edit'} $kind')),body:SafeArea(child:Form(key:form,child:feed([for(final w in widgets)Padding(padding:const EdgeInsets.only(bottom:14),child:w)]))));
+    return Scaffold(appBar:AppBar(title:Text('${widget.row==null?'New':'Edit'} $kind')),body:SafeArea(child:Form(key:form,child:feed([for(final w in widgets)Padding(padding:const EdgeInsets.only(bottom:14),child:w)]))),bottomNavigationBar:SafeArea(top:false,child:Padding(padding:const EdgeInsets.fromLTRB(16,8,16,12),child:FilledButton(onPressed:busy?null:save,child:Text(busy?'Saving…':widget.row==null?'Create $kind':'Save changes')))));
   }
 }

@@ -15,7 +15,7 @@ Future<String?> prompt(BuildContext c,String title,{bool secret=false,String ini
     TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Cancel')),FilledButton(onPressed:()=>Navigator.pop(ctx,value.trim()),child:const Text('Continue'))]));
 }
 Widget panel(BuildContext c,List<Widget> children)=>Container(margin:const EdgeInsets.only(bottom:12),padding:const EdgeInsets.all(16),
-  decoration:BoxDecoration(color:Theme.of(c).colorScheme.surface,borderRadius:BorderRadius.circular(18)),
+  decoration:BoxDecoration(color:Theme.of(c).colorScheme.surface,borderRadius:BorderRadius.circular(20),border:Border.all(color:Theme.of(c).dividerColor.withAlpha(28))),
   child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:children));
 Widget heading(String title,{Widget? action})=>Row(children:[Expanded(child:Text(title,style:const TextStyle(fontSize:17,fontWeight:FontWeight.w700))),if(action!=null) action]);
 Widget note(String text)=>Padding(padding:const EdgeInsets.symmetric(vertical:10),child:Text(text,style:const TextStyle(fontSize:14)));

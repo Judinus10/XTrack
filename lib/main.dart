@@ -41,8 +41,10 @@ ThemeData appearance(Brightness b){
   final scheme=ColorScheme.fromSeed(seedColor:green,brightness:b).copyWith(primary:dark?accent:green,surface:dark?const Color(0xff1b1d1c):Colors.white);
   return ThemeData(useMaterial3:true,colorScheme:scheme,scaffoldBackgroundColor:dark?const Color(0xff101010):const Color(0xfff5f7f6),
     appBarTheme:const AppBarTheme(backgroundColor:Colors.transparent,scrolledUnderElevation:0),
-    inputDecorationTheme:const InputDecorationTheme(border:OutlineInputBorder(borderRadius:BorderRadius.all(Radius.circular(14)))),
-    navigationBarTheme:NavigationBarThemeData(height:68,indicatorColor:green.withAlpha(36)));
+    inputDecorationTheme:InputDecorationTheme(filled:true,fillColor:dark?const Color(0xff252826):const Color(0xfff0f3f1),border:const OutlineInputBorder(borderRadius:BorderRadius.all(Radius.circular(14)),borderSide:BorderSide.none),enabledBorder:const OutlineInputBorder(borderRadius:BorderRadius.all(Radius.circular(14)),borderSide:BorderSide.none),focusedBorder:const OutlineInputBorder(borderRadius:BorderRadius.all(Radius.circular(14)),borderSide:BorderSide(color:green,width:1.5))),
+    navigationBarTheme:NavigationBarThemeData(height:72,labelBehavior:NavigationDestinationLabelBehavior.alwaysShow,indicatorColor:green.withAlpha(36)),
+    filledButtonTheme:FilledButtonThemeData(style:FilledButton.styleFrom(minimumSize:const Size(48,48),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14)))),
+    chipTheme:ChipThemeData(shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14))));
 }
 class XTrack extends ConsumerStatefulWidget{
   const XTrack({super.key});
@@ -72,15 +74,16 @@ class Shell extends StatefulWidget {
   @override State<Shell> createState()=>_ShellState();
 }
 class _ShellState extends State<Shell>{
-  int index=0;
-  static const titles=['Home','Finance','Planner','Personal','More'];
-  static const symbols=[Icons.home_outlined,Icons.account_balance_wallet_outlined,Icons.calendar_month_outlined,Icons.person_outline,Icons.more_horiz];
+  int index=2;
+  // Keep Dashboard in the middle: it is the app's primary landing point.
+  static const titles=['Finance','Planner','Dashboard','Personal','More'];
+  static const symbols=[Icons.account_balance_wallet_outlined,Icons.calendar_month_outlined,Icons.home_outlined,Icons.person_outline,Icons.more_horiz];
   DateTime selected=DateTime.now();
   @override Widget build(BuildContext c)=>Scaffold(
-    appBar:AppBar(title:Text(index==0?'XTrack':titles[index],style:const TextStyle(fontWeight:FontWeight.w800)),actions:[
+    appBar:AppBar(title:Text(titles[index],style:const TextStyle(fontWeight:FontWeight.w800)),actions:[
       IconButton(tooltip:'Search',onPressed:()=>open(c,const SearchRecords()),icon:const Icon(Icons.search)),
       IconButton(tooltip:'Reminders',onPressed:()=>open(c,const ReminderPage()),icon:const Icon(Icons.notifications_none))]),
-    body:SafeArea(child:IndexedStack(index:index,children:[const Dashboard(),const Finance(),Planner(selected,(d)=>setState(()=>selected=d)),const LifeHub(),const MoreHub()])),
+    body:SafeArea(child:IndexedStack(index:index,children:[const Finance(),Planner(selected,(d)=>setState(()=>selected=d)),const Dashboard(),const LifeHub(),const MoreHub()])),
     floatingActionButton:index==4?null:FloatingActionButton.small(tooltip:'Quick Add',onPressed:()=>addMenu(c,index,selected),child:const Icon(Icons.add)),
     bottomNavigationBar:NavigationBar(selectedIndex:index,onDestinationSelected:(i)=>setState(()=>index=i),destinations:[
       for(var i=0;i<titles.length;i++)NavigationDestination(icon:Icon(symbols[i]),label:titles[i])]));

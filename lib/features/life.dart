@@ -6,13 +6,28 @@ Widget destination(BuildContext c,String label,IconData icon,Widget page)=>ListT
 Widget screen(String title,Widget child)=>Scaffold(appBar:AppBar(title:Text(title)),body:SafeArea(child:child));
 Future<String?> choose(BuildContext c,String title,List<String> values)=>showModalBottomSheet<String>(context:c,showDragHandle:true,builder:(ctx)=>SafeArea(child:ListView(shrinkWrap:true,children:[Padding(padding:const EdgeInsets.all(16),child:heading(title)),for(final v in values)ListTile(title:Text(v),onTap:()=>Navigator.pop(ctx,v))])));
 Future<void> addMenu(BuildContext c,int index,DateTime date)async{
-  final options=[['Income','Expense','Transfer','Task','Habit','Goal','Water','Journal'],['Income','Expense','Transfer','Account','Budget','Asset'],['Task','Habit','Project'],['Goal',...units.keys]];
+  final options=[
+    ['Income','Expense','Transfer','Account','Budget','Asset'],
+    ['Task','Habit','Project'],
+    ['Expense','Income','Transfer','Task','Habit','Goal','Water','Sleep','Workout','Log weight','Journal','Custom reminder'],
+    ['Goal','Water','Sleep','Workout','Body measurement','Mood','Journal','Log weight','Custom reminder']
+  ];
   final kind=await choose(c,'Quick Add',options[index]);if(kind==null||!c.mounted)return;
+  final s=storeOf(c);
+  if(kind=='Log weight'){await logWeight(c,s);return;}
+  if(kind=='Custom reminder'){await customReminder(c,s);return;}
+  if(kind=='Account'){
+    final type=await choose(c,'Account type',['Cash','Bank account','Savings account','Digital wallet','Fixed deposit']);
+    if(type==null||!c.mounted)return;
+    await open(c,Editor(kind:'Account',initialAccountType:type));return;
+  }
   if(units.containsKey(kind)||['Budget','Asset','Project'].contains(kind)){await entry(c,kind);return;}
-  await open(c,Editor(kind:kind,initialDay:index==2?dayKey(date):null));
+  await open(c,Editor(kind:kind,initialDay:index==1?dayKey(date):null));
 }
 String tableFor(String kind)=>switch(kind){'Budget'=>'budgets','Asset'=>'valuations','Project'=>'projects',_=>'personal_logs'};
-Future<void> entry(BuildContext c,String kind,[RowData? r])=>guard(c,()async{
+Future<void> entry(BuildContext c,String kind,[RowData? r])async{
+  if(kind=='Journal'){await open<void>(c,JournalEditor(row:r));return;}
+  await guard(c,()async{
   final s=storeOf(c),budget=kind=='Budget',asset=kind=='Asset',project=kind=='Project';
   final date=await showDatePicker(context:c,initialDate:DateTime.parse(r?['day']??(budget&&r!=null?"${r['month']}-01":today)),firstDate:DateTime(1900),lastDate:DateTime(2200));
   if(date==null||!c.mounted)return;
@@ -44,7 +59,8 @@ Future<void> entry(BuildContext c,String kind,[RowData? r])=>guard(c,()async{
     }
   }
   await s.save(tableFor(kind),row,id:r?['id']);
-});
+  });
+}
 class Records extends ConsumerWidget{
   const Records(this.kind,{super.key});final String kind;
   @override Widget build(BuildContext c,WidgetRef ref){
@@ -58,8 +74,19 @@ class Records extends ConsumerWidget{
       }else if(kind=='Asset'){detail="${r['kind']} · ${s.money(r['value'])} · Change ${s.money(r['value']-r['cost'])}";}
       else if(kind=='Project'){final tasks=s.rows('tasks').where((t)=>t['project']==r['id']);detail="${r['day']} · ${tasks.where((t)=>t['completed']!=null).length}/${tasks.length} tasks done";}
       else{detail="${r['day']} · ${units[kind]!.isEmpty?'':decimal(r['quantity'])+' '+units[kind]!} ${r['notes']}";}
-      return panel(c,[ListTile(title:Text(r['name']??r['category']),subtitle:Text(detail),onTap:()=>entry(c,kind,r),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{if(await confirm(c,'Delete record?','Remove this entry?')&&c.mounted)await guard(c,()=>s.remove(table,r['id']));}))]);
+      return panel(c,[ListTile(title:Text(r['name']??r['category']),subtitle:Text(detail),onTap:()=>kind=='Project'?open(c,ProjectDetail(r)):entry(c,kind,r),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{if(await confirm(c,'Delete record?','Remove this entry?')&&c.mounted)await guard(c,()=>s.remove(table,r['id']));}))]);
     })]));
+  }
+}
+class ProjectDetail extends ConsumerWidget{
+  const ProjectDetail(this.project,{super.key});final RowData project;
+  @override Widget build(BuildContext c,WidgetRef ref){
+    final s=ref.watch(storeProvider),tasks=s.rows('tasks').where((t)=>t['project']==project['id']).toList()..sort((a,b)=>(a['day'] as String).compareTo(b['day'] as String));
+    final complete=tasks.where((t)=>t['completed']!=null).length;
+    return Scaffold(appBar:AppBar(title:Text(project['name']),actions:[IconButton(tooltip:'Edit project',onPressed:()=>entry(c,'Project',project),icon:const Icon(Icons.edit_outlined))]),body:SafeArea(child:feed([
+      panel(c,[note('${project['day']} · $complete of ${tasks.length} tasks completed'),meter(tasks.isEmpty?0:complete/tasks.length.toDouble()),FilledButton.icon(onPressed:()=>open(c,Editor(kind:'Task',initialProject:project['id'])),icon:const Icon(Icons.add),label:const Text('Add task to this project'))]),
+      panel(c,[heading('Project tasks'),if(tasks.isEmpty)note('No tasks yet. Add the first task to keep this project moving.'),for(final t in tasks)taskTile(c,s,t)])
+    ])));
   }
 }
 class Planner extends ConsumerWidget{
@@ -70,9 +97,10 @@ class Planner extends ConsumerWidget{
     return feed([heading('${months[date.month-1]} ${date.year}',action:link('Today',()=>select(DateTime.now()))),
       Row(children:[IconButton(tooltip:'Previous week',icon:const Icon(Icons.chevron_left),onPressed:()=>select(shift(date,-7))),Expanded(child:Text(day,textAlign:TextAlign.center)),IconButton(tooltip:'Next week',icon:const Icon(Icons.chevron_right),onPressed:()=>select(shift(date,7)))]),
       Row(children:[for(var i=0;i<7;i++)Expanded(child:InkWell(onTap:()=>select(shift(mon,i)),child:Container(padding:const EdgeInsets.symmetric(vertical:10),decoration:BoxDecoration(color:i==date.weekday-1?green.withAlpha(65):null,borderRadius:BorderRadius.circular(12)),child:Text('${weekdays[i]}\n${shift(mon,i).day}',textAlign:TextAlign.center))))]),
-      panel(c,[heading('Agenda'),for(final t in tasks)ListTile(leading:Text(t['startMinute']==null?'All day':clock(c,t['startMinute'])),title:Text(t['name']),subtitle:Text(t['completed']!=null?'Completed':t['stage']??'To Do'),onTap:()=>edit(c,'Task',t)),
-      for(final h in s.habits.where((h)=>h['archived']==0&&scheduled(h,date)))ListTile(leading:const Icon(Icons.repeat),title:Text(h['name']),subtitle:const Text('Scheduled habit'),onTap:()=>edit(c,'Habit',h))]),
-      destination(c,'Tasks',Icons.checklist,screen('Tasks',const TaskPage())),destination(c,'Habits',Icons.repeat,screen('Habits',const HabitPage())),destination(c,'Projects',Icons.folder_outlined,const Records('Project')),destination(c,'Kanban board',Icons.view_column,const Board()),destination(c,'Focus timer',Icons.timer_outlined,const FocusTimer())]);
+      panel(c,[heading('Agenda'),if(tasks.isEmpty&&s.habits.where((h)=>h['archived']==0&&scheduled(h,date)).isEmpty)note('Nothing scheduled for this day.'),
+      for(final t in tasks)ListTile(leading:Checkbox(value:t['completed']!=null,onChanged:(_)=>guard(c,()=>s.change('tasks',t['id'],{'completed':t['completed']==null?today:null}))),title:Text(t['name']),subtitle:Text('${t['startMinute']==null?'All day':clock(c,t['startMinute'])} · ${t['completed']!=null?'Completed':t['stage']??'To Do'}'),onTap:()=>edit(c,'Task',t)),
+      for(final h in s.habits.where((h)=>h['archived']==0&&scheduled(h,date)))Builder(builder:(_){final checked=logs(s,h).contains(day),canCheck=day.compareTo(today)<=0;return ListTile(leading:Checkbox(value:checked,onChanged:canCheck?(_)=>guard(c,()=>s.log(h['id'],day)):null),title:Text(h['name']),subtitle:const Text('Habit'),onTap:()=>edit(c,'Habit',h));})]),
+      destination(c,'Tasks · list and board',Icons.checklist,screen('Tasks',const TaskPage())),destination(c,'Habits',Icons.repeat,screen('Habits',const HabitPage())),destination(c,'Projects',Icons.folder_outlined,const Records('Project')),destination(c,'Focus timer',Icons.timer_outlined,const FocusTimer())]);
   }
 }
 class FocusTimer extends ConsumerStatefulWidget{const FocusTimer({super.key});@override ConsumerState<FocusTimer> createState()=>_FocusState();}
@@ -87,15 +115,47 @@ class _FocusState extends ConsumerState<FocusTimer>{
     }),child:Text(active==null?'Start session':'Finish session')),for(final r in rows)ListTile(title:Text(r['name']),subtitle:Text(Duration(milliseconds:(r['ended']??DateTime.now().millisecondsSinceEpoch)-r['started']).toString().split('.').first))]));
   }
 }
-class LifeHub extends StatelessWidget{const LifeHub({super.key});@override Widget build(BuildContext c)=>feed([destination(c,'Goals',Icons.flag_outlined,const GoalPage()),destination(c,'Height and weight',Icons.monitor_weight_outlined,const Personal()),for(final kind in units.keys)destination(c,kind,Icons.edit_note,Records(kind))]);}
-class MoreHub extends StatelessWidget{const MoreHub({super.key});@override Widget build(BuildContext c)=>feed([destination(c,'Analytics',Icons.bar_chart,const Analytics()),destination(c,'Reminders',Icons.notifications_none,const ReminderPage()),destination(c,'Reports and exports',Icons.file_download_outlined,const ReportsPage()),destination(c,'Recycle bin',Icons.restore_from_trash,const BinPage()),destination(c,'Settings and backup',Icons.settings_outlined,const SettingsPage())]);}
+Future<void> quickWater(BuildContext c,Store s,int ml)=>guard(c,()=>s.save('personal_logs',{'kind':'Water','name':'Water','day':today,'quantity':minor('$ml'),'notes':''}));
+class LifeHub extends ConsumerWidget{
+  const LifeHub({super.key});
+  @override Widget build(BuildContext c,WidgetRef ref){final s=ref.watch(storeProvider);
+    final water=s.rows('personal_logs').where((r)=>r['kind']=='Water'&&r['day']==today).fold<int>(0,(v,r)=>v+(r['quantity'] as int));
+    return feed([panel(c,[heading('Today’s water'),Text('${decimal(water)} ml recorded',style:Theme.of(c).textTheme.titleMedium),const SizedBox(height:8),Wrap(spacing:8,children:[for(final ml in [150,250,500])ActionChip(avatar:const Icon(Icons.water_drop,color:Colors.blue),label:Text('+$ml ml'),onPressed:()=>quickWater(c,s,ml)),ActionChip(label:const Text('Custom amount'),onPressed:()=>entry(c,'Water'))])]),
+      panel(c,[heading('Personal tracking'),destination(c,'Goals',Icons.flag_outlined,const GoalPage()),destination(c,'Height and weight',Icons.monitor_weight_outlined,const Personal()),for(final kind in units.keys)destination(c,kind,kind=='Water'?Icons.water_drop_outlined:kind=='Sleep'?Icons.bedtime_outlined:kind=='Workout'?Icons.fitness_center:Icons.edit_note,Records(kind))])]);
+  }
+}
+class JournalEditor extends ConsumerStatefulWidget{
+  const JournalEditor({super.key,this.row});final RowData? row;
+  @override ConsumerState<JournalEditor> createState()=>_JournalEditorState();
+}
+class _JournalEditorState extends ConsumerState<JournalEditor>{
+  late final TextEditingController title=TextEditingController(text:widget.row?['name']??'');
+  late final TextEditingController body=TextEditingController(text:widget.row?['notes']??'');
+  DateTime date=DateTime.now();bool saving=false;
+  @override void initState(){super.initState();if(widget.row!=null)date=DateTime.parse(widget.row!['day']);}
+  @override void dispose(){title.dispose();body.dispose();super.dispose();}
+  @override Widget build(BuildContext c){final s=ref.watch(storeProvider);return Scaffold(appBar:AppBar(title:Text(widget.row==null?'New journal entry':'Edit journal entry'),actions:[TextButton(onPressed:saving?null:()async{if(title.text.trim().isEmpty||body.text.trim().isEmpty){message(c,'Add a title and write a few lines first.');return;}setState(()=>saving=true);await guard(c,()=>s.save('personal_logs',{'kind':'Journal','name':title.text.trim(),'notes':body.text.trim(),'day':dayKey(date)},id:widget.row?['id']));if(c.mounted)Navigator.pop(c);},child:const Text('Save'))]),body:SafeArea(child:Padding(padding:const EdgeInsets.all(16),child:Column(children:[ListTile(contentPadding:EdgeInsets.zero,title:const Text('Entry date'),subtitle:Text(dayKey(date)),trailing:const Icon(Icons.calendar_today_outlined),onTap:()async{final d=await showDatePicker(context:c,initialDate:date,firstDate:DateTime(1900),lastDate:DateTime.now());if(d!=null)setState(()=>date=d);}),TextField(controller:title,decoration:const InputDecoration(labelText:'Title'),textCapitalization:TextCapitalization.sentences),const SizedBox(height:12),Expanded(child:TextField(controller:body,decoration:const InputDecoration(labelText:'Write your entry',alignLabelWithHint:true),maxLines:null,expands:true,textAlignVertical:TextAlignVertical.top,textCapitalization:TextCapitalization.sentences))]))));}
+}
+class MoreHub extends StatelessWidget{
+  const MoreHub({super.key});
+  @override Widget build(BuildContext c)=>feed([
+    panel(c,[heading('Insights'),destination(c,'Analytics',Icons.bar_chart,const Analytics()),destination(c,'Reports and exports',Icons.file_download_outlined,const ReportsPage())]),
+    panel(c,[heading('Reminders'),destination(c,'Reminder schedule',Icons.notifications_none,const ReminderPage()),destination(c,'Reminder settings',Icons.alarm_outlined,const SettingsPage())]),
+    panel(c,[heading('Data and app'),destination(c,'Recycle bin',Icons.restore_from_trash,const BinPage()),destination(c,'Settings, security and backup',Icons.settings_outlined,const SettingsPage())])
+  ]);
+}
 class SearchRecords extends ConsumerStatefulWidget{const SearchRecords({super.key});@override ConsumerState<SearchRecords> createState()=>_SearchState();}
 class _SearchState extends ConsumerState<SearchRecords>{
   String query='';
-  @override Widget build(BuildContext c){final s=ref.watch(storeProvider);return screen('Search',feed([TextField(autofocus:true,decoration:const InputDecoration(labelText:'Search records'),onChanged:(v)=>setState(()=>query=v.trim().toLowerCase())),if(query.isNotEmpty)for(final group in {'tasks':'Task','habits':'Habit','goals':'Goal','accounts':'Account','projects':'Project','personal_logs':'Personal'}.entries)for(final r in s.rows(group.key).where((r)=>(r['name'] as String).toLowerCase().contains(query)))ListTile(title:Text(r['name']),subtitle:Text(group.value),onTap:()=>['Project','Personal'].contains(group.value)?entry(c,group.value=='Project'?'Project':r['kind'],r):edit(c,group.value,r))]));}
+  @override Widget build(BuildContext c){final s=ref.watch(storeProvider);return screen('Search',feed([TextField(autofocus:true,decoration:const InputDecoration(labelText:'Search records'),onChanged:(v)=>setState(()=>query=v.trim().toLowerCase())),if(query.isNotEmpty)for(final group in {'tasks':'Task','habits':'Habit','goals':'Goal','accounts':'Account','projects':'Project','personal_logs':'Personal'}.entries)for(final r in s.rows(group.key).where((r)=>(r['name'] as String).toLowerCase().contains(query)))ListTile(title:Text(r['name']),subtitle:Text(group.value),onTap:()=>group.value=='Project'?open(c,ProjectDetail(r)):group.value=='Personal'?entry(c,r['kind'],r):edit(c,group.value,r))]));}
 }
 class FinanceTools extends ConsumerWidget{
   const FinanceTools({super.key});
+  Future<void> addSchedule(BuildContext c,Store s)async{
+    final choice=await choose(c,'Add a payment',['Recurring payment','Subscription']);
+    if(choice==null||!c.mounted)return;
+    await create(c,s,choice=='Subscription'?'Subscription':'Recurring');
+  }
   Future<void> create(BuildContext c,Store s,String kind)async{
     final name=await prompt(c,'Name');if(name==null||name.isEmpty||!c.mounted)return;
     final amount=minor(await prompt(c,'Amount')??'');if(amount==null||amount<=0||!c.mounted)return;
@@ -138,10 +198,10 @@ class FinanceTools extends ConsumerWidget{
     final debt=loans.where((r)=>r['kind']=='Debt').fold<int>(0,(n,l)=>n+remaining(s,l));
     final owed=loans.where((r)=>r['kind']=='Lending').fold<int>(0,(n,l)=>n+remaining(s,l));
     final assets=s.rows('accounts').fold<int>(0,(n,a)=>n+s.balance(a))+owed+s.rows('valuations').fold<int>(0,(n,a)=>n+(a['value'] as int));
-    return screen('Loans and schedules',feed([panel(c,[heading('Net worth'),note(s.money(assets-debt)),note('Assets ${s.money(assets)} · Liabilities ${s.money(debt)}')]),
-      Wrap(children:[for(final k in ['Debt','Lending','Recurring','Subscription'])link('Add $k',()=>guard(c,()=>create(c,s,k)))]),
-      for(final l in loans)panel(c,[heading(l['name']),note("${l['kind']} · Due ${l['due']} · ${s.money(remaining(s,l))} outstanding"),if(remaining(s,l)>0)link('Record repayment',()=>guard(c,()=>repay(c,s,l))),for(final r in s.rows('repayments').where((r)=>r['loan']==l['id']))note("${r['day']} · ${s.money(r['principal'])} principal + ${s.money(r['interest'])} interest")]),
-      for(final r in s.rows('recurring'))SwitchListTile(title:Text(r['name']),subtitle:Text("${r['frequency']} · ${s.money(r['amount'])} · Next ${r['next']}"),value:r['paused']==0,onChanged:(v)=>guard(c,()=>s.change('recurring',r['id'],{'paused':v?0:1,if(v&&r['next'].compareTo(today)<0)'next':today}))) ]));
+    return screen('Loans & recurring',feed([panel(c,[heading('Net worth'),Text(s.money(assets-debt),style:Theme.of(c).textTheme.headlineSmall?.copyWith(fontWeight:FontWeight.bold)),note('Assets ${s.money(assets)} · Liabilities ${s.money(debt)}')]),
+      panel(c,[heading('Borrowing and lending'),Wrap(spacing:8,children:[for(final k in ['Debt','Lending'])ActionChip(label:Text('Add $k'),onPressed:()=>guard(c,()=>create(c,s,k)))])]),
+      for(final l in loans)panel(c,[heading(l['name']),note("${l['kind']} · Due ${l['due']} · ${s.money(remaining(s,l))} outstanding"),if(remaining(s,l)>0)FilledButton.tonal(onPressed:()=>guard(c,()=>repay(c,s,l)),child:const Text('Record repayment')),for(final r in s.rows('repayments').where((r)=>r['loan']==l['id']))note("${r['day']} · ${s.money(r['principal'])} principal + ${s.money(r['interest'])} interest")]),
+      panel(c,[heading('Recurring payments and subscriptions',action:ActionChip(label:const Text('Add'),onPressed:()=>addSchedule(c,s))),if(s.rows('recurring').isEmpty)note('No recurring payments or subscriptions yet.'),for(final r in s.rows('recurring'))SwitchListTile(title:Text(r['name']),subtitle:Text("${r['subscription']==1?'Subscription':'Recurring'} · ${r['frequency']} · ${s.money(r['amount'])} · Next ${r['next']}"),value:r['paused']==0,onChanged:(v)=>guard(c,()=>s.change('recurring',r['id'],{'paused':v?0:1,if(v&&r['next'].compareTo(today)<0)'next':today})))]) ]));
   }
 }
 Widget metricGrid(BuildContext c,Map<String,String> values)=>LayoutBuilder(builder:(ctx,box){
@@ -156,7 +216,7 @@ class CardSettings extends ConsumerWidget{
 }
 class BinPage extends ConsumerWidget{
   const BinPage({super.key});
-  @override Widget build(BuildContext c,WidgetRef ref){final s=ref.watch(storeProvider),rows=s.rows('deleted_records');return screen('Recycle bin',feed([note('Deleted entries are recoverable for 30 days.'),for(final r in rows)ListTile(title:Text(r['title']),subtitle:Text(r['removed']),onTap:()=>guard(c,()=>s.recover(r)),trailing:IconButton(tooltip:'Permanently delete',icon:const Icon(Icons.delete_forever),onPressed:()async{if(await confirm(c,'Permanently delete?','This entry cannot be recovered.')&&c.mounted)await guard(c,()=>s.remove('deleted_records',r['id']));}))]));}
+  @override Widget build(BuildContext c,WidgetRef ref){final s=ref.watch(storeProvider),rows=s.rows('deleted_records');return screen('Recycle bin',feed([note('Deleted entries can be restored for 30 days.'),if(rows.isEmpty)note('The recycle bin is empty.'),for(final r in rows)ListTile(title:Text(r['title']),subtitle:Text(r['removed']),trailing:Wrap(mainAxisSize:MainAxisSize.min,children:[TextButton.icon(onPressed:()=>guard(c,()=>s.recover(r)),icon:const Icon(Icons.restore),label:const Text('Restore')),IconButton(tooltip:'Permanently delete',icon:const Icon(Icons.delete_forever),onPressed:()async{if(await confirm(c,'Permanently delete?','This entry cannot be recovered.')&&c.mounted)await guard(c,()=>s.remove('deleted_records',r['id']));})]))]));}
 }
 class ReportsPage extends ConsumerStatefulWidget{
   const ReportsPage({super.key});

@@ -34,21 +34,22 @@ class Personal extends ConsumerWidget{
         if((minor(value)??0)<=0)throw StateError('Enter a positive height');
         await s.setting('height',value);
       }))]),
-      panel(c,[heading('Weight history'),link('Log weight',()=>guard(c,()async{
-        final d=await showDatePicker(context:c,initialDate:DateTime.now(),firstDate:DateTime(1900),lastDate:DateTime.now());
-        if(d==null||!c.mounted)return;
-        final input=await prompt(c,'Weight in kg');if(input==null)return;
-        final n=minor(input);if(n==null||n<=0)throw StateError('Enter a positive weight');
-        await s.write((t)async{
-          await t.rawInsert('INSERT OR REPLACE INTO measurements(day,weight) VALUES(?,?)',[dayKey(d),n]);
-          await t.execute("UPDATE goals SET current=(SELECT weight FROM measurements ORDER BY day DESC LIMIT 1) WHERE category='Weight loss'");
-        });
-      })),link('Schedule weight check-ins',()=>customReminder(c,s,title:'Log your weight')),
+      panel(c,[heading('Weight history'),link('Log weight',()=>logWeight(c,s)),link('Schedule weight check-ins',()=>customReminder(c,s,title:'Log your weight')),
       if(rows.length>1)SizedBox(height:120,child:LineChart(LineChartData(titlesData:const FlTitlesData(show:false),lineBarsData:[LineChartBarData(color:green,spots:[for(final r in rows.reversed)FlSpot(DateTime.parse(r['day']).millisecondsSinceEpoch/86400000,r['weight']/100)])]))),
       if(rows.isEmpty)note('No measurements yet.'),
       for(final r in rows)ListTile(title:Text('${decimal(r['weight'])} kg'),subtitle:Text(r['day']))])]));
   }
 }
+Future<void> logWeight(BuildContext c,Store s)=>guard(c,()async{
+  final d=await showDatePicker(context:c,initialDate:DateTime.now(),firstDate:DateTime(1900),lastDate:DateTime.now());
+  if(d==null||!c.mounted)return;
+  final input=await prompt(c,'Weight in kg');if(input==null)return;
+  final n=minor(input);if(n==null||n<=0)throw StateError('Enter a positive weight');
+  await s.write((t)async{
+    await t.rawInsert('INSERT OR REPLACE INTO measurements(day,weight) VALUES(?,?)',[dayKey(d),n]);
+    await t.execute("UPDATE goals SET current=(SELECT weight FROM measurements ORDER BY day DESC LIMIT 1) WHERE category='Weight loss'");
+  });
+});
 class PatternPad extends StatefulWidget{
   const PatternPad(this.submit,{super.key});
   final ValueChanged<String> submit;
